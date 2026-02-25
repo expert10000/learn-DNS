@@ -3,4 +3,5 @@ bind9/log/
 bind9/keys/
 bind9/zones/*.signed
 bind9/zones/*.jnl
+bind9/zones/*.jbk
 unbound/log/
