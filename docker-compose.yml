@@ -1,0 +1,103 @@
+version: "3.9"
+
+name: dns-security-lab
+
+services:
+  authoritative:
+    image: internetsystemsconsortium/bind9:9.18
+    container_name: dns_authoritative
+    restart: unless-stopped
+    networks:
+      dns_core:
+        ipv4_address: 172.31.0.10
+    volumes:
+      - ./bind9/named.conf:/etc/bind/named.conf:ro
+      - ./bind9/zones:/etc/bind/zones
+      - ./bind9/keys:/etc/bind/keys
+      - ./bind9/log:/var/log/bind
+    # No published ports: reachable only inside Docker networks.
+
+  resolver:
+    image: mvance/unbound:1.20.0
+    container_name: dns_resolver
+    restart: unless-stopped
+    depends_on:
+      - authoritative
+    networks:
+      dns_core:
+        ipv4_address: 172.31.0.20
+      client_net:
+        ipv4_address: 172.32.0.20
+      untrusted_net:
+        ipv4_address: 172.33.0.20
+      mgmt_net:
+        ipv4_address: 172.30.0.20
+    volumes:
+      - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
+      - ./unbound/log:/var/log/unbound
+    # Optional: expose ONLY to localhost if you want to dig from host OS:
+    ports:
+      - "127.0.0.1:5300:53/udp"
+      - "127.0.0.1:5300:53/tcp"
+
+  client:
+    image: alpine:3.20
+    container_name: dns_client
+    command: ["sh", "-lc", "apk add --no-cache bind-tools && sleep infinity"]
+    networks:
+      client_net:
+        ipv4_address: 172.32.0.50
+    # Use this to run dig and basic checks from "trusted" network.
+
+  untrusted:
+    image: alpine:3.20
+    container_name: dns_untrusted
+    command: ["sh", "-lc", "apk add --no-cache bind-tools && sleep infinity"]
+    networks:
+      untrusted_net:
+        ipv4_address: 172.33.0.50
+    # Use this to verify recursion is blocked for untrusted segment.
+
+  # Optional: lightweight packet capture / debug (lab only)
+  toolbox:
+    image: nicolaka/netshoot:latest
+    container_name: dns_toolbox
+    command: ["sh", "-lc", "sleep infinity"]
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.60
+      client_net:
+        ipv4_address: 172.32.0.60
+      dns_core:
+        ipv4_address: 172.31.0.60
+      untrusted_net:
+        ipv4_address: 172.33.0.60
+
+networks:
+  mgmt_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+  dns_core:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+
+  client_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.32.0.0/24
+
+  untrusted_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.33.0.0/24
