@@ -139,3 +139,57 @@ button:disabled {
   min-height: 140px;
   white-space: pre-wrap;
 }
+
+.config-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.config-tabs button {
+  background: #e6ebf2;
+  color: #101418;
+}
+
+.config-tabs button.active {
+  background: #0a3749;
+  color: #fff;
+}
+
+.config-list {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.config-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  background: #f7f4ee;
+  border: 1px solid #e0d7c8;
+  color: #101418;
+}
+
+.config-item.active {
+  background: #0a3749;
+  border-color: #0a3749;
+  color: #fff;
+}
+
+.config-size {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+.config-item.active .config-size {
+  color: #e6eef8;
+  opacity: 0.85;
+}
+
+.config-empty {
+  font-size: 0.9rem;
+  opacity: 0.7;
+}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import './index.css';
 
 type Client = 'trusted' | 'untrusted' | 'mgmt';
@@ -33,6 +33,8 @@ type OutputView = {
   command: string;
   text: string;
 };
+
+type ConfigGroup = 'authoritative' | 'resolver';
 
 type ConfigFile = {
   path: string;
@@ -114,10 +116,25 @@ export default function App() {
   const [configPath, setConfigPath] = useState<string>('');
   const [configContent, setConfigContent] = useState<string>('');
   const [configStatus, setConfigStatus] = useState<string>('');
+  const [configGroup, setConfigGroup] = useState<ConfigGroup>('authoritative');
 
   const clientBase = `${API_BASE}/${req.client}`;
   const missingLabKey = useMemo(() => LAB_API_KEY.trim().length === 0, []);
-  const labHeaders = LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {};
+  const labHeaders: Record<string, string> = {};
+  if (LAB_API_KEY.trim()) {
+    labHeaders['x-api-key'] = LAB_API_KEY;
+  }
+  const groupPrefix = configGroup === 'authoritative' ? 'bind/' : 'unbound/';
+  const groupedFiles = configFiles.filter((f) => f.path.startsWith(groupPrefix));
+
+  useEffect(() => {
+    if (groupedFiles.length === 0) {
+      return;
+    }
+    if (!configPath || !configPath.startsWith(groupPrefix)) {
+      setConfigPath(groupedFiles[0].path);
+    }
+  }, [groupPrefix, groupedFiles, configPath]);
 
   const runDig = async () => {
     setIsBusy(true);
@@ -212,8 +229,11 @@ export default function App() {
         labHeaders
       );
       setConfigFiles(result.files);
-      if (result.files.length > 0 && !configPath) {
-        setConfigPath(result.files[0].path);
+      const firstInGroup = result.files.find((f) =>
+        f.path.startsWith(groupPrefix)
+      );
+      if (firstInGroup) {
+        setConfigPath(firstInGroup.path);
       }
       setConfigStatus(`Loaded ${result.files.length} files.`);
     } catch (err) {
@@ -382,23 +402,40 @@ export default function App() {
             <code>docker-compose.yml</code>.
           </div>
         )}
-        <div className="grid">
-          <label>
-            File
-            <select
-              value={configPath}
-              onChange={(e) => setConfigPath(e.target.value)}
+        <div className="config-tabs">
+          <button
+            className={configGroup === 'authoritative' ? 'active' : ''}
+            onClick={() => setConfigGroup('authoritative')}
+            disabled={isBusy}
+          >
+            Authoritative
+          </button>
+          <button
+            className={configGroup === 'resolver' ? 'active' : ''}
+            onClick={() => setConfigGroup('resolver')}
+            disabled={isBusy}
+          >
+            Resolver
+          </button>
+        </div>
+
+        <div className="config-list">
+          {groupedFiles.length === 0 && (
+            <div className="config-empty">No files loaded yet.</div>
+          )}
+          {groupedFiles.map((f) => (
+            <button
+              key={f.path}
+              className={`config-item ${
+                configPath === f.path ? 'active' : ''
+              }`}
+              onClick={() => setConfigPath(f.path)}
+              disabled={isBusy}
             >
-              {configFiles.length === 0 && (
-                <option value="">(Load files)</option>
-              )}
-              {configFiles.map((f) => (
-                <option key={f.path} value={f.path}>
-                  {f.path}
-                </option>
-              ))}
-            </select>
-          </label>
+              <span>{f.path}</span>
+              <span className="config-size">{f.size} B</span>
+            </button>
+          ))}
         </div>
 
         <div className="actions">
