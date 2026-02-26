@@ -5,7 +5,7 @@ This single Markdown document contains:
 - **Live traffic viewing** (tcpdump + PCAP for Wireshark)
 - **Behavior tests** (recursion, segmentation, DNSSEC, host exposure)
 - **PASS/FAIL smoke-test script**
-- **Thesis evidence checklist**
+- ** evidence checklist**
 
 ---
 
@@ -70,7 +70,7 @@ docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}
 docker exec -it dns_resolver sh -lc "apk add --no-cache tcpdump >/dev/null 2>&1 || true; tcpdump -ni any port 53"
 ```
 
-### 2.2 Capture PCAP and open in Wireshark (best for thesis evidence)
+### 2.2 Capture PCAP and open in Wireshark (best for  evidence)
 ```bash
 # capture to file inside resolver
 docker exec -it dns_resolver sh -lc "apk add --no-cache tcpdump >/dev/null 2>&1 || true; tcpdump -ni any -w /tmp/dns.pcap port 53"
@@ -200,7 +200,7 @@ chmod +x smoke_test_dns_lab.sh
 
 ---
 
-## 5) Thesis evidence checklist (what to screenshot / include)
+## 5)  evidence checklist (what to screenshot / include)
 
 ### 5.1 Topology proof
 - Output (screenshot) of:
@@ -215,7 +215,7 @@ chmod +x smoke_test_dns_lab.sh
   - resolver → client response
 
 ### 5.3 Security behavior proof (table)
-Create a table in the thesis:
+Create a table in the :
 
 | Test | Description | Command | Expected | Observed |
 |---|---|---|---|---|

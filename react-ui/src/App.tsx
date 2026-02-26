@@ -34,6 +34,24 @@ type OutputView = {
   text: string;
 };
 
+type ConfigFile = {
+  path: string;
+  size: number;
+};
+
+type ConfigListResponse = {
+  ok: boolean;
+  files: ConfigFile[];
+};
+
+type ConfigFileResponse = {
+  ok: boolean;
+  path: string;
+  size: number;
+  truncated: boolean;
+  content: string;
+};
+
 const DEFAULT_REQUEST: DigRequest = {
   client: 'trusted',
   name: 'www.example.test',
@@ -92,9 +110,14 @@ export default function App() {
   const [output, setOutput] = useState<OutputView | null>(null);
   const [status, setStatus] = useState<string>('');
   const [isBusy, setIsBusy] = useState(false);
+  const [configFiles, setConfigFiles] = useState<ConfigFile[]>([]);
+  const [configPath, setConfigPath] = useState<string>('');
+  const [configContent, setConfigContent] = useState<string>('');
+  const [configStatus, setConfigStatus] = useState<string>('');
 
   const clientBase = `${API_BASE}/${req.client}`;
   const missingLabKey = useMemo(() => LAB_API_KEY.trim().length === 0, []);
+  const labHeaders = LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {};
 
   const runDig = async () => {
     setIsBusy(true);
@@ -116,7 +139,7 @@ export default function App() {
         const result = await postJson<LabDigResponse>(
           `${LAB_API_BASE}/dig`,
           { profile: client, ...body },
-          LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {}
+          labHeaders
         );
         const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
         setOutput({ ok: result.ok, command: result.command, text });
@@ -150,7 +173,7 @@ export default function App() {
       } else {
         const result = await getJson<{ ok: boolean }>(
           `${LAB_API_BASE}/health`,
-          LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {}
+          labHeaders
         );
         setStatus(result.ok ? 'Lab API healthy' : 'Lab API unhealthy');
       }
@@ -167,7 +190,7 @@ export default function App() {
     try {
       const result = await getJson<LabDigResponse>(
         `${LAB_API_BASE}/logs/${service}?tail=200`,
-        LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {}
+        labHeaders
       );
       const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
       setOutput({ ok: result.ok, command: result.command, text });
@@ -175,6 +198,52 @@ export default function App() {
     } catch (err) {
       setStatus((err as Error).message);
       setOutput(null);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const loadConfigList = async () => {
+    setIsBusy(true);
+    setConfigStatus('Loading config file list...');
+    try {
+      const result = await getJson<ConfigListResponse>(
+        `${LAB_API_BASE}/config/list`,
+        labHeaders
+      );
+      setConfigFiles(result.files);
+      if (result.files.length > 0 && !configPath) {
+        setConfigPath(result.files[0].path);
+      }
+      setConfigStatus(`Loaded ${result.files.length} files.`);
+    } catch (err) {
+      setConfigStatus((err as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const viewConfigFile = async () => {
+    if (!configPath) {
+      setConfigStatus('Select a config file first.');
+      return;
+    }
+    setIsBusy(true);
+    setConfigStatus(`Loading ${configPath}...`);
+    try {
+      const result = await getJson<ConfigFileResponse>(
+        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(configPath)}`,
+        labHeaders
+      );
+      setConfigContent(result.content);
+      setConfigStatus(
+        `Loaded ${result.path} (${result.size} bytes)${
+          result.truncated ? ' [TRUNCATED]' : ''
+        }`
+      );
+    } catch (err) {
+      setConfigStatus((err as Error).message);
+      setConfigContent('');
     } finally {
       setIsBusy(false);
     }
@@ -301,6 +370,49 @@ export default function App() {
         <div className="card-title">Output</div>
         <pre className="output">
           {output ? `${output.command}\n\n${output.text}` : 'No output yet.'}
+        </pre>
+      </section>
+
+      <section className="card">
+        <div className="card-title">Config Files (Lab API)</div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="grid">
+          <label>
+            File
+            <select
+              value={configPath}
+              onChange={(e) => setConfigPath(e.target.value)}
+            >
+              {configFiles.length === 0 && (
+                <option value="">(Load files)</option>
+              )}
+              {configFiles.map((f) => (
+                <option key={f.path} value={f.path}>
+                  {f.path}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="actions">
+          <button onClick={loadConfigList} disabled={isBusy}>
+            Load Files
+          </button>
+          <button onClick={viewConfigFile} disabled={isBusy || !configPath}>
+            View File
+          </button>
+        </div>
+
+        <div className="status">{configStatus || 'Ready.'}</div>
+        <pre className="output">
+          {configContent || 'No config loaded.'}
         </pre>
       </section>
     </div>

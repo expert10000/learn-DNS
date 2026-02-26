@@ -135,6 +135,12 @@ services:
     volumes:
       - ./bind9/log:/logs/bind:ro
       - ./unbound/log:/logs/unbound:ro
+      - ./bind9/named.conf:/config/bind/named.conf:ro
+      - ./bind9/zones:/config/bind/zones:ro
+      - ./bind9/keys:/config/bind/keys:ro
+      - ./unbound/unbound.conf:/config/unbound/unbound.conf:ro
+      - ./unbound/root.hints:/config/unbound/root.hints:ro
+      - ./unbound/example.test.key:/config/unbound/example.test.key:ro
 
   react_ui:
     build:

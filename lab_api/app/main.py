@@ -39,6 +39,13 @@ NAME_RE = re.compile(
     r"^(?=.{1,253}\.?$)([A-Za-z0-9-]{1,63}\.)*[A-Za-z0-9-]{1,63}\.?$"
 )
 
+CONFIG_ROOT = Path("/config")
+CONFIG_DIRS = {
+    "bind": CONFIG_ROOT / "bind",
+    "unbound": CONFIG_ROOT / "unbound",
+}
+MAX_CONFIG_BYTES = 200_000
+
 class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
     name: str = Field(..., examples=["example.org"])
@@ -53,6 +60,21 @@ class CmdResponse(BaseModel):
     exit_code: int
     stdout: str
     stderr: str
+
+class ConfigFile(BaseModel):
+    path: str
+    size: int
+
+class ConfigListResponse(BaseModel):
+    ok: bool
+    files: list[ConfigFile]
+
+class ConfigFileResponse(BaseModel):
+    ok: bool
+    path: str
+    size: int
+    truncated: bool
+    content: str
 
 def require_key(x_api_key: Optional[str]):
     if not API_KEY:
@@ -84,6 +106,31 @@ def run_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
             stdout=e.stdout or "",
             stderr=(e.stderr or "") + "\nTIMEOUT",
         )
+
+def list_config_files() -> list[ConfigFile]:
+    files: list[ConfigFile] = []
+    for root in CONFIG_DIRS.values():
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file():
+                rel = path.relative_to(CONFIG_ROOT).as_posix()
+                files.append(ConfigFile(path=rel, size=path.stat().st_size))
+    files.sort(key=lambda f: f.path)
+    return files
+
+def resolve_config_path(rel_path: str) -> Path:
+    if not rel_path or rel_path.startswith("/") or ".." in Path(rel_path).parts:
+        raise HTTPException(status_code=400, detail="Invalid path")
+
+    full = (CONFIG_ROOT / rel_path).resolve()
+    for root in CONFIG_DIRS.values():
+        try:
+            full.relative_to(root)
+            return full
+        except ValueError:
+            continue
+    raise HTTPException(status_code=403, detail="Path not allowed")
 
 @app.get("/health")
 def health():
@@ -127,3 +174,30 @@ def logs(
     logfile = str(candidates[0])
     tail = max(1, min(tail, 5000))
     return run_cmd(["sh", "-lc", f"tail -n {tail} {logfile}"])
+
+@app.get("/config/list", response_model=ConfigListResponse)
+def config_list(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    return ConfigListResponse(ok=True, files=list_config_files())
+
+@app.get("/config/file", response_model=ConfigFileResponse)
+def config_file(path: str, x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    full = resolve_config_path(path)
+    if not full.exists() or not full.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+
+    data = full.read_bytes()
+    truncated = False
+    if len(data) > MAX_CONFIG_BYTES:
+        data = data[:MAX_CONFIG_BYTES]
+        truncated = True
+
+    content = data.decode("utf-8", errors="replace")
+    return ConfigFileResponse(
+        ok=True,
+        path=path,
+        size=full.stat().st_size,
+        truncated=truncated,
+        content=content,
+    )
