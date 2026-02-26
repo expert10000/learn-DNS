@@ -36,6 +36,8 @@ The resolver only allows recursion from the trusted and mgmt subnets.
 - `/api/trusted`, `/api/untrusted`, `/api/mgmt`.
 - The lab API is proxied for logs and optional dig execution.
 - `/lab-api` (requires `LAB_API_KEY` / `VITE_LAB_API_KEY`).
+- The UI also includes a config viewer with tabs for `authoritative` (BIND) and
+  `resolver` (Unbound) files, served via the lab API.
 
 ## Quick Start
 1. `docker compose up -d`
