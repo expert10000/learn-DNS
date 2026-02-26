@@ -1,4 +1,4 @@
-# startr.md
+# starter.md
 
 Generated: 2026-02-26 15:08:02
 
@@ -194,5 +194,14 @@ time="2026-02-26T15:08:13+01:00" level=warning msg="G:\\Applications-2026-02-25-
 www.example.test.	293	IN	A	172.31.0.10
 www.example.test.	293	IN	RRSIG	A 13 3 300 20260311114008 20260225171235 2860 example.test. BGwk9cxUkTtA5SLyO1+LGPDZWvehakDsh4GQrweo3z2Xw5Pitfw23bdj Ij8VuGhwI49D7jM9N9ZkIpKQZu9jKg==
 ```
+
+## Architecture Update (Per-client APIs + Lab API + React UI)
+- Per-client FastAPI agents run inside the segmented networks.
+- `client` (trusted) queries resolver at `172.32.0.20`.
+- `untrusted` queries resolver at `172.33.0.20`.
+- `mgmt_client` queries resolver at `172.30.0.20`.
+- React UI proxies to client APIs via `/api/trusted`, `/api/untrusted`, `/api/mgmt`.
+- Lab API is proxied at `/lab-api` for logs and optional dig execution.
+- Run with `docker compose up -d --build`.
 
 
