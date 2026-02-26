@@ -86,13 +86,15 @@ services:
     networks:
       mgmt_net:
         ipv4_address: 172.30.0.10
+      public_net:
+        ipv4_address: 172.34.0.10
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
-    # Bind ONLY to localhost of the VM
+    # Exposed to host (Win11). Use firewall rules if needed.
     ports:
-      - "127.0.0.1:9443:9443"
-      - "127.0.0.1:9000:9000"
+      - "9443:9443"
+      - "9000:9000"
 
   # -------------------------
   # Option 2: ONE management API for React (enable via profile "api")
@@ -112,6 +114,8 @@ services:
         ipv4_address: 172.33.0.90
       mgmt_net:
         ipv4_address: 172.30.0.90
+      public_net:
+        ipv4_address: 172.34.0.90
     # Bind ONLY to localhost of the VM
     ports:
       - "127.0.0.1:8000:8000"
@@ -119,6 +123,20 @@ services:
     volumes:
       - ./bind9/log:/logs/bind:ro
       - ./unbound/log:/logs/unbound:ro
+
+  react_ui:
+    build:
+      context: ./react-ui
+      args:
+        VITE_API_BASE: "http://localhost:8000"
+        VITE_LAB_API_KEY: "change_me_long_random"
+    container_name: dns_react_ui
+    restart: unless-stopped
+    networks:
+      public_net:
+        ipv4_address: 172.34.0.50
+    ports:
+      - "5173:80"
 
 volumes:
   portainer_data:
@@ -151,3 +169,10 @@ networks:
     ipam:
       config:
         - subnet: 172.33.0.0/24
+
+  public_net:
+    driver: bridge
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.34.0.0/24

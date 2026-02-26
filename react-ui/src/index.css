@@ -1,0 +1,141 @@
+:root {
+  color-scheme: light;
+  font-family: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  color: #101418;
+  background-color: #f6f3ed;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at top left, #f7efe2, #f2f4f8 55%, #e9eef6);
+}
+
+code {
+  background: #f0e6d6;
+  padding: 0 0.3rem;
+  border-radius: 6px;
+}
+
+.page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 48px 24px 64px;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.header h1 {
+  font-family: 'IBM Plex Serif', 'Segoe UI', serif;
+  font-size: 2.4rem;
+  margin: 0 0 6px;
+}
+
+.header p {
+  margin: 0;
+  opacity: 0.75;
+}
+
+.pill {
+  background: #101418;
+  color: #f5f5f0;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.alert {
+  background: #ffe8d2;
+  border: 1px solid #f2c39c;
+  padding: 12px 16px;
+  border-radius: 12px;
+  margin-bottom: 20px;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 20px;
+  padding: 20px 22px;
+  box-shadow: 0 20px 40px rgba(35, 45, 66, 0.08);
+  margin-bottom: 20px;
+}
+
+.card-title {
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+input,
+select {
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.95rem;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.95rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+button {
+  border: none;
+  background: #0a3749;
+  color: #fff;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.status {
+  font-size: 0.9rem;
+  opacity: 0.75;
+}
+
+.output {
+  background: #0f1b2d;
+  color: #dfe7f3;
+  padding: 16px;
+  border-radius: 12px;
+  min-height: 140px;
+  white-space: pre-wrap;
+}
