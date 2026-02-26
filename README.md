@@ -10,9 +10,12 @@ The resolver only allows recursion from the trusted and mgmt subnets.
 ## Services
 - `authoritative` (BIND9): serves `example.test` and auto-signs with DNSSEC.
 - `resolver` (Unbound): validates DNSSEC and answers only for allowed subnets.
-- `client`: trusted test box with `dig`.
-- `untrusted`: untrusted test box with `dig`.
+- `client`: trusted client API (FastAPI) that runs `dig` from the trusted segment.
+- `untrusted`: untrusted client API (FastAPI) that runs `dig` from the untrusted segment.
+- `mgmt_client`: management client API (FastAPI) for the mgmt segment.
 - `toolbox`: optional netshoot container for troubleshooting.
+- `lab_api`: management API (FastAPI) for logs and optional dig execution.
+- `react_ui`: React UI (Nginx) that talks to per-client APIs and the lab API.
 
 ## Topology
 - Authoritative: `172.31.0.10`
@@ -22,6 +25,17 @@ The resolver only allows recursion from the trusted and mgmt subnets.
 
 ## Ports
 - Resolver is published to host localhost only: `127.0.0.1:5300` (TCP/UDP 53).
+- React UI is published to host: `http://localhost:5173`.
+
+## API & UI (New Architecture)
+- Per-client FastAPI agents run inside the segmented networks.
+- `client` (trusted) -> resolver at `172.32.0.20`.
+- `untrusted` -> resolver at `172.33.0.20`.
+- `mgmt_client` -> resolver at `172.30.0.20`.
+- The React UI talks to these agents via Nginx proxy paths.
+- `/api/trusted`, `/api/untrusted`, `/api/mgmt`.
+- The lab API is proxied for logs and optional dig execution.
+- `/lab-api` (requires `LAB_API_KEY` / `VITE_LAB_API_KEY`).
 
 ## Quick Start
 1. `docker compose up -d`

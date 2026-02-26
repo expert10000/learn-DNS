@@ -44,23 +44,36 @@ services:
 
   client:
     build:
-      context: ./client_tools
-    image: dns-client-tools:latest
+      context: ./client_api
     container_name: dns_client
-    command: ["sh", "-lc", "sleep infinity"]
+    environment:
+      - PROFILE=trusted
+      - DEFAULT_DNS_SERVER=172.32.0.20
     networks:
       client_net:
         ipv4_address: 172.32.0.50
 
   untrusted:
     build:
-      context: ./client_tools
-    image: dns-client-tools:latest
+      context: ./client_api
     container_name: dns_untrusted
-    command: ["sh", "-lc", "sleep infinity"]
+    environment:
+      - PROFILE=untrusted
+      - DEFAULT_DNS_SERVER=172.33.0.20
     networks:
       untrusted_net:
         ipv4_address: 172.33.0.50
+
+  mgmt_client:
+    build:
+      context: ./client_api
+    container_name: dns_mgmt_client
+    environment:
+      - PROFILE=mgmt
+      - DEFAULT_DNS_SERVER=172.30.0.20
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.50
 
   toolbox:
     image: nicolaka/netshoot:latest
@@ -97,11 +110,10 @@ services:
       - "9000:9000"
 
   # -------------------------
-  # Option 2: ONE management API for React (enable via profile "api")
-  # No FastAPI on each node; only here.
+  # Option 2: ONE management API for React (logs + optional dig)
+  # Optional: logs/management endpoints. React uses per-client APIs by default.
   # -------------------------
   lab_api:
-    profiles: ["api"]
     build: ./lab_api
     container_name: dns_lab_api
     restart: unless-stopped
@@ -128,13 +140,20 @@ services:
     build:
       context: ./react-ui
       args:
-        VITE_API_BASE: "http://localhost:8000"
+        VITE_API_BASE: "/api"
+        VITE_LAB_API_BASE: "/lab-api"
         VITE_LAB_API_KEY: "change_me_long_random"
     container_name: dns_react_ui
     restart: unless-stopped
     networks:
       public_net:
         ipv4_address: 172.34.0.50
+      mgmt_net:
+        ipv4_address: 172.30.0.70
+      client_net:
+        ipv4_address: 172.32.0.70
+      untrusted_net:
+        ipv4_address: 172.33.0.70
     ports:
       - "5173:80"
 

@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import './index.css';
 
-type Profile = 'trusted' | 'untrusted' | 'mgmt';
+type Client = 'trusted' | 'untrusted' | 'mgmt';
+type Backend = 'client' | 'lab_api';
 
 type DigRequest = {
-  profile: Profile;
+  client: Client;
   name: string;
   qtype: string;
   dnssec: boolean;
@@ -12,7 +13,14 @@ type DigRequest = {
   short: boolean;
 };
 
-type CmdResponse = {
+type ClientDigResponse = {
+  ok: boolean;
+  ad: boolean;
+  cmd: string[];
+  output: string;
+};
+
+type LabDigResponse = {
   ok: boolean;
   command: string;
   exit_code: number;
@@ -20,8 +28,14 @@ type CmdResponse = {
   stderr: string;
 };
 
+type OutputView = {
+  ok: boolean;
+  command: string;
+  text: string;
+};
+
 const DEFAULT_REQUEST: DigRequest = {
-  profile: 'trusted',
+  client: 'trusted',
   name: 'www.example.test',
   qtype: 'A',
   dnssec: true,
@@ -29,15 +43,23 @@ const DEFAULT_REQUEST: DigRequest = {
   short: false,
 };
 
-const API_KEY = import.meta.env.VITE_LAB_API_KEY || '';
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/+$/, '');
+const LAB_API_BASE = (import.meta.env.VITE_LAB_API_BASE || '/lab-api').replace(
+  /\/+$/,
+  ''
+);
+const LAB_API_KEY = import.meta.env.VITE_LAB_API_KEY || '';
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  extraHeaders: Record<string, string> = {}
+): Promise<T> {
+  const res = await fetch(path, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'x-api-key': API_KEY,
+      ...extraHeaders,
     },
     body: JSON.stringify(body),
   });
@@ -50,12 +72,11 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      'x-api-key': API_KEY,
-    },
-  });
+async function getJson<T>(
+  path: string,
+  extraHeaders: Record<string, string> = {}
+): Promise<T> {
+  const res = await fetch(path, { headers: extraHeaders });
 
   if (!res.ok) {
     const text = await res.text();
@@ -67,19 +88,40 @@ async function getJson<T>(path: string): Promise<T> {
 
 export default function App() {
   const [req, setReq] = useState<DigRequest>(DEFAULT_REQUEST);
-  const [output, setOutput] = useState<CmdResponse | null>(null);
+  const [backend, setBackend] = useState<Backend>('client');
+  const [output, setOutput] = useState<OutputView | null>(null);
   const [status, setStatus] = useState<string>('');
   const [isBusy, setIsBusy] = useState(false);
 
-  const missingKey = useMemo(() => API_KEY.trim().length === 0, []);
+  const clientBase = `${API_BASE}/${req.client}`;
+  const missingLabKey = useMemo(() => LAB_API_KEY.trim().length === 0, []);
 
   const runDig = async () => {
     setIsBusy(true);
     setStatus('Running dig...');
     try {
-      const result = await postJson<CmdResponse>('/dig', req);
-      setOutput(result);
-      setStatus(result.ok ? 'OK' : 'Completed with errors');
+      const { client, ...body } = req;
+      if (backend === 'client') {
+        const result = await postJson<ClientDigResponse>(
+          `${clientBase}/dig`,
+          body
+        );
+        setOutput({
+          ok: result.ok,
+          command: result.cmd.join(' '),
+          text: result.output,
+        });
+        setStatus(result.ok ? `OK (AD=${result.ad ? 'yes' : 'no'})` : 'Completed');
+      } else {
+        const result = await postJson<LabDigResponse>(
+          `${LAB_API_BASE}/dig`,
+          { profile: client, ...body },
+          LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {}
+        );
+        const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+        setOutput({ ok: result.ok, command: result.command, text });
+        setStatus(result.ok ? 'OK' : 'Completed with errors');
+      }
     } catch (err) {
       setStatus((err as Error).message);
       setOutput(null);
@@ -92,8 +134,26 @@ export default function App() {
     setIsBusy(true);
     setStatus('Checking health...');
     try {
-      const result = await getJson<{ ok: boolean }>('/health');
-      setStatus(result.ok ? 'API healthy' : 'API unhealthy');
+      if (backend === 'client') {
+        const result = await getJson<{
+          ok: boolean;
+          profile: string;
+          default_dns_server: string;
+        }>(`${clientBase}/health`);
+        setStatus(
+          result.ok
+            ? `Client API healthy (${result.profile} via ${
+                result.default_dns_server || 'default'
+              })`
+            : 'Client API unhealthy'
+        );
+      } else {
+        const result = await getJson<{ ok: boolean }>(
+          `${LAB_API_BASE}/health`,
+          LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {}
+        );
+        setStatus(result.ok ? 'Lab API healthy' : 'Lab API unhealthy');
+      }
     } catch (err) {
       setStatus((err as Error).message);
     } finally {
@@ -103,10 +163,14 @@ export default function App() {
 
   const viewLogs = async (service: 'bind' | 'unbound') => {
     setIsBusy(true);
-    setStatus(`Fetching ${service} logs...`);
+    setStatus(`Fetching ${service} logs (Lab API)...`);
     try {
-      const result = await getJson<CmdResponse>(`/logs/${service}?tail=200`);
-      setOutput(result);
+      const result = await getJson<LabDigResponse>(
+        `${LAB_API_BASE}/logs/${service}?tail=200`,
+        LAB_API_KEY ? { 'x-api-key': LAB_API_KEY } : {}
+      );
+      const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+      setOutput({ ok: result.ok, command: result.command, text });
       setStatus(result.ok ? 'Logs fetched' : 'Log fetch failed');
     } catch (err) {
       setStatus((err as Error).message);
@@ -121,14 +185,14 @@ export default function App() {
       <header className="header">
         <div>
           <h1>DNS Security Lab</h1>
-          <p>React UI on Win11, talking to the lab API.</p>
+          <p>React UI on Win11, talking to per-client APIs and the lab API.</p>
         </div>
-        <div className="pill">API: {API_BASE}</div>
+        <div className="pill">API: {backend === 'client' ? clientBase : LAB_API_BASE}</div>
       </header>
 
-      {missingKey && (
+      {backend === 'lab_api' && missingLabKey && (
         <div className="alert">
-          <strong>Missing API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+          <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
           <code>.env.local</code> to match <code>LAB_API_KEY</code> from
           <code>docker-compose.yml</code>.
         </div>
@@ -138,11 +202,22 @@ export default function App() {
         <div className="card-title">Dig Request</div>
         <div className="grid">
           <label>
-            Profile
+            Execute via
             <select
-              value={req.profile}
+              value={backend}
+              onChange={(e) => setBackend(e.target.value as Backend)}
+            >
+              <option value="client">client API</option>
+              <option value="lab_api">lab API</option>
+            </select>
+          </label>
+
+          <label>
+            Client
+            <select
+              value={req.client}
               onChange={(e) =>
-                setReq({ ...req, profile: e.target.value as Profile })
+                setReq({ ...req, client: e.target.value as Client })
               }
             >
               <option value="trusted">trusted</option>
@@ -225,9 +300,7 @@ export default function App() {
       <section className="card">
         <div className="card-title">Output</div>
         <pre className="output">
-          {output
-            ? `${output.command}\n\n${output.stdout}${output.stderr ? `\n${output.stderr}` : ''}`
-            : 'No output yet.'}
+          {output ? `${output.command}\n\n${output.text}` : 'No output yet.'}
         </pre>
       </section>
     </div>
