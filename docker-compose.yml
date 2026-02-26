@@ -3,13 +3,27 @@ version: "3.9"
 name: dns-security-lab
 
 services:
-  authoritative:
+  authoritative_parent:
     image: internetsystemsconsortium/bind9:9.18
-    container_name: dns_authoritative
+    container_name: dns_authoritative_parent
     restart: unless-stopped
     networks:
       dns_core:
         ipv4_address: 172.31.0.10
+    volumes:
+      - ./bind9_parent/named.conf:/etc/bind/named.conf:ro
+      - ./bind9_parent/zones:/etc/bind/zones
+      - ./bind9_parent/keys:/etc/bind/keys
+      - ./bind9_parent/log:/var/log/bind
+    # No published ports: reachable only inside Docker networks.
+
+  authoritative_child:
+    image: internetsystemsconsortium/bind9:9.18
+    container_name: dns_authoritative_child
+    restart: unless-stopped
+    networks:
+      dns_core:
+        ipv4_address: 172.31.0.11
     volumes:
       - ./bind9/named.conf:/etc/bind/named.conf:ro
       - ./bind9/zones:/etc/bind/zones
@@ -22,7 +36,8 @@ services:
     container_name: dns_resolver
     restart: unless-stopped
     depends_on:
-      - authoritative
+      - authoritative_parent
+      - authoritative_child
     networks:
       dns_core:
         ipv4_address: 172.31.0.20
@@ -35,8 +50,10 @@ services:
     volumes:
       - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
-      - ./unbound/example.test.key:/opt/unbound/etc/unbound/example.test.key:ro
+      - ./unbound/start.sh:/opt/unbound/etc/unbound/start.sh:ro
+      - ./anchors:/opt/unbound/etc/unbound/anchors
       - ./unbound/log:/var/log/unbound
+    command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     # Optional: expose ONLY to localhost on the VM (host-side dig via tunnel)
     ports:
       - "127.0.0.1:5300:53/udp"
@@ -119,6 +136,8 @@ services:
     restart: unless-stopped
     environment:
       - LAB_API_KEY=change_me_long_random
+      - CAPTURE_RESOLVER_CONTAINER=dns_capture_resolver
+      - CAPTURE_AUTHORITATIVE_CONTAINER=dns_capture_authoritative
     networks:
       client_net:
         ipv4_address: 172.32.0.90
@@ -133,6 +152,7 @@ services:
       - "127.0.0.1:8000:8000"
     # Optional: allow API to show logs via HTTP (read-only)
     volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
       - ./bind9/log:/logs/bind:ro
       - ./unbound/log:/logs/unbound:ro
       - ./bind9/named.conf:/config/bind/named.conf:ro
@@ -140,7 +160,80 @@ services:
       - ./bind9/keys:/config/bind/keys:ro
       - ./unbound/unbound.conf:/config/unbound/unbound.conf:ro
       - ./unbound/root.hints:/config/unbound/root.hints:ro
-      - ./unbound/example.test.key:/config/unbound/example.test.key:ro
+      - ./anchors:/config/unbound/anchors:ro
+      - ./captures:/captures
+
+  capture_resolver:
+    image: nicolaka/netshoot:latest
+    container_name: dns_capture_resolver
+    command: ["sh", "-lc", "sleep infinity"]
+    network_mode: "service:resolver"
+    depends_on:
+      - resolver
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./captures:/captures
+
+  capture_authoritative:
+    image: nicolaka/netshoot:latest
+    container_name: dns_capture_authoritative
+    command: ["sh", "-lc", "sleep infinity"]
+    network_mode: "service:authoritative_child"
+    depends_on:
+      - authoritative_child
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./captures:/captures
+
+  anchor_export:
+    image: alpine:3.20
+    container_name: dns_anchor_export
+    depends_on:
+      - authoritative_parent
+    command:
+      - sh
+      - -lc
+      - >
+        set -e;
+        echo "Waiting for test. KSK...";
+        while true; do
+          f="$$(grep -l ' DNSKEY 257 ' /bind9_parent/keys/Ktest.+013+*.key 2>/dev/null | head -n1 || true)";
+          if [ -n "$$f" ]; then
+            cp "$$f" /anchors/test.key;
+            echo "Wrote /anchors/test.key";
+            break;
+          fi;
+          sleep 1;
+        done
+    volumes:
+      - ./bind9_parent/keys:/bind9_parent/keys:ro
+      - ./anchors:/anchors
+
+  ds_recompute:
+    image: python:3.12-alpine
+    container_name: dns_ds_recompute
+    depends_on:
+      - authoritative_child
+    working_dir: /work
+    command:
+      - sh
+      - -lc
+      - >
+        apk add --no-cache docker-cli >/dev/null 2>&1 || true;
+        python scripts/recompute_ds.py --wait 120 --exit-code-on-change;
+        rc=$$?;
+        if [ $$rc -eq 10 ]; then
+          docker restart dns_authoritative_parent;
+          rc=0;
+        fi;
+        exit $$rc
+    volumes:
+      - ./:/work
+      - /var/run/docker.sock:/var/run/docker.sock
 
   react_ui:
     build:

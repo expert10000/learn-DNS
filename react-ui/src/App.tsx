@@ -54,6 +54,36 @@ type ConfigFileResponse = {
   content: string;
 };
 
+type CaptureTarget = 'resolver' | 'authoritative';
+type CaptureFilter = 'dns' | 'dns+dot' | 'all';
+
+type CaptureFile = {
+  file: string;
+  size: number;
+  mtime: string;
+  target: CaptureTarget;
+};
+
+type CaptureListResponse = {
+  ok: boolean;
+  files: CaptureFile[];
+  running: Record<CaptureTarget, boolean>;
+};
+
+type CaptureStartResponse = {
+  ok: boolean;
+  target: CaptureTarget;
+  file: string;
+  filter: CaptureFilter;
+  command: string;
+};
+
+type CaptureStopResponse = {
+  ok: boolean;
+  target: CaptureTarget;
+  file?: string;
+};
+
 const DEFAULT_REQUEST: DigRequest = {
   client: 'trusted',
   name: 'www.example.test',
@@ -106,6 +136,20 @@ async function getJson<T>(
   return res.json() as Promise<T>;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  const units = ['KB', 'MB', 'GB'];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
+}
+
 export default function App() {
   const [req, setReq] = useState<DigRequest>(DEFAULT_REQUEST);
   const [backend, setBackend] = useState<Backend>('client');
@@ -117,6 +161,17 @@ export default function App() {
   const [configContent, setConfigContent] = useState<string>('');
   const [configStatus, setConfigStatus] = useState<string>('');
   const [configGroup, setConfigGroup] = useState<ConfigGroup>('authoritative');
+  const [captureTarget, setCaptureTarget] =
+    useState<CaptureTarget>('resolver');
+  const [captureFilter, setCaptureFilter] = useState<CaptureFilter>('dns');
+  const [captureFiles, setCaptureFiles] = useState<CaptureFile[]>([]);
+  const [captureStatus, setCaptureStatus] = useState<string>('');
+  const [captureRunning, setCaptureRunning] = useState<
+    Record<CaptureTarget, boolean>
+  >({
+    resolver: false,
+    authoritative: false,
+  });
 
   const clientBase = `${API_BASE}/${req.client}`;
   const missingLabKey = useMemo(() => LAB_API_KEY.trim().length === 0, []);
@@ -264,6 +319,102 @@ export default function App() {
     } catch (err) {
       setConfigStatus((err as Error).message);
       setConfigContent('');
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const loadCaptures = async () => {
+    setIsBusy(true);
+    setCaptureStatus('Loading captures...');
+    try {
+      const result = await getJson<CaptureListResponse>(
+        `${LAB_API_BASE}/capture/list`,
+        labHeaders
+      );
+      setCaptureFiles(result.files);
+      setCaptureRunning(result.running);
+      setCaptureStatus(`Loaded ${result.files.length} captures.`);
+    } catch (err) {
+      setCaptureStatus((err as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (missingLabKey) {
+      return;
+    }
+    void loadCaptures();
+  }, [missingLabKey]);
+
+  const startCapture = async () => {
+    setIsBusy(true);
+    setCaptureStatus(`Starting ${captureTarget} capture...`);
+    try {
+      const result = await postJson<CaptureStartResponse>(
+        `${LAB_API_BASE}/capture/start`,
+        { target: captureTarget, filter: captureFilter },
+        labHeaders
+      );
+      setCaptureStatus(
+        `Capture started on ${result.target}: ${result.file} (${result.filter})`
+      );
+      await loadCaptures();
+    } catch (err) {
+      setCaptureStatus((err as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const stopCapture = async () => {
+    setIsBusy(true);
+    setCaptureStatus(`Stopping ${captureTarget} capture...`);
+    try {
+      const result = await postJson<CaptureStopResponse>(
+        `${LAB_API_BASE}/capture/stop`,
+        { target: captureTarget },
+        labHeaders
+      );
+      setCaptureStatus(
+        result.file
+          ? `Capture stopped. File: ${result.file}`
+          : `Capture stopped on ${result.target}.`
+      );
+      await loadCaptures();
+    } catch (err) {
+      setCaptureStatus((err as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const downloadCapture = async (file: string) => {
+    setIsBusy(true);
+    setCaptureStatus(`Downloading ${file}...`);
+    try {
+      const res = await fetch(
+        `${LAB_API_BASE}/capture/download?file=${encodeURIComponent(file)}`,
+        { headers: labHeaders }
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setCaptureStatus(`Downloaded ${file}`);
+    } catch (err) {
+      setCaptureStatus((err as Error).message);
     } finally {
       setIsBusy(false);
     }
@@ -451,6 +602,90 @@ export default function App() {
         <pre className="output">
           {configContent || 'No config loaded.'}
         </pre>
+      </section>
+
+      <section className="card">
+        <div className="card-title">Packet Capture (Lab API)</div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="grid">
+          <label>
+            Target
+            <select
+              value={captureTarget}
+              onChange={(e) =>
+                setCaptureTarget(e.target.value as CaptureTarget)
+              }
+              disabled={isBusy}
+            >
+              <option value="resolver">resolver</option>
+              <option value="authoritative">authoritative</option>
+            </select>
+          </label>
+          <label>
+            Filter
+            <select
+              value={captureFilter}
+              onChange={(e) =>
+                setCaptureFilter(e.target.value as CaptureFilter)
+              }
+              disabled={isBusy}
+            >
+              <option value="dns">DNS (port 53)</option>
+              <option value="dns+dot">DNS + DoT (53, 853)</option>
+              <option value="all">All traffic</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="actions">
+          <button onClick={startCapture} disabled={isBusy || missingLabKey}>
+            Start Capture
+          </button>
+          <button onClick={stopCapture} disabled={isBusy || missingLabKey}>
+            Stop Capture
+          </button>
+          <button onClick={loadCaptures} disabled={isBusy || missingLabKey}>
+            Refresh List
+          </button>
+        </div>
+
+        <div className="status">
+          {captureStatus ||
+            `Resolver: ${
+              captureRunning.resolver ? 'running' : 'idle'
+            }, Authoritative: ${
+              captureRunning.authoritative ? 'running' : 'idle'
+            }.`}
+        </div>
+
+        <div className="capture-list">
+          {captureFiles.length === 0 && (
+            <div className="config-empty">No captures yet.</div>
+          )}
+          {captureFiles.map((f) => (
+            <div key={f.file} className="capture-item">
+              <div>
+                <div className="capture-name">{f.file}</div>
+                <div className="capture-meta">
+                  {f.target} • {formatBytes(f.size)} •{' '}
+                  {new Date(f.mtime).toLocaleString()}
+                </div>
+              </div>
+              <button
+                onClick={() => downloadCapture(f.file)}
+                disabled={isBusy || missingLabKey}
+              >
+                Download
+              </button>
+            </div>
+          ))}
+        </div>
       </section>
     </div>
   );

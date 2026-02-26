@@ -1,6 +1,6 @@
 FROM python:3.12-alpine
 
-RUN apk add --no-cache bind-tools ca-certificates
+RUN apk add --no-cache bind-tools ca-certificates docker-cli
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt

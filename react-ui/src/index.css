@@ -193,3 +193,33 @@ button:disabled {
   font-size: 0.9rem;
   opacity: 0.7;
 }
+
+.capture-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.capture-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #f7f4ee;
+  border: 1px solid #e0d7c8;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.capture-item button {
+  background: #1b4b5a;
+}
+
+.capture-name {
+  font-weight: 600;
+}
+
+.capture-meta {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}

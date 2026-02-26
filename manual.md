@@ -12,14 +12,16 @@ This single Markdown document contains:
 ## 0) Assumptions (adjust names if different)
 
 ### Containers
-- `dns_authoritative` — BIND9 authoritative for `example.test` (DNSSEC auto-signing enabled)
+- `dns_authoritative_parent` — BIND9 authoritative for `test.` (DNSSEC auto-signing enabled)
+- `dns_authoritative_child` — BIND9 authoritative for `example.test.` (DNSSEC auto-signing enabled)
 - `dns_resolver` — Unbound recursive resolver with DNSSEC validation
 - `dns_client` — trusted test box with `dig`
 - `dns_untrusted` — untrusted test box with `dig`
 - `dns_toolbox` — optional netshoot container for troubleshooting
 
 ### IP plan (example)
-- Authoritative: `172.31.0.10`
+- Authoritative (parent/test): `172.31.0.10`
+- Authoritative (child/example.test): `172.31.0.11`
 - Resolver (trusted iface): `172.32.0.20`
 - Resolver (untrusted iface): `172.33.0.20`
 - Resolver (mgmt iface): `172.30.0.20`
@@ -51,7 +53,8 @@ docker network inspect dns-security-lab_mgmt_net
 ### 1.3 Show each container’s IP on every attached network
 ```bash
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_resolver
-docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_authoritative
+docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_authoritative_parent
+docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_authoritative_child
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_client
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_untrusted
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_toolbox
@@ -117,7 +120,8 @@ This is your key “no open resolver” proof.
 ### Test 3 — Authoritative is not reachable from client LAN (segmentation)
 ```bash
 docker exec -it dns_client sh
-dig @172.31.0.10 example.test SOA +time=1 +tries=1
+dig @172.31.0.10 test SOA +time=1 +tries=1
+dig @172.31.0.11 example.test SOA +time=1 +tries=1
 ```
 **Expected:** timeout / unreachable (client is not attached to authoritative’s network).
 
@@ -126,13 +130,14 @@ dig @172.31.0.10 example.test SOA +time=1 +tries=1
 ### Test 4 — Resolver can reach authoritative (internal resolution path works)
 ```bash
 docker exec -it dns_resolver sh
-# direct query to authoritative should work
-drill @172.31.0.10 example.test SOA || true
+# direct query to parent and child should work
+drill @172.31.0.10 test SOA || true
+drill @172.31.0.11 example.test SOA || true
 
 # local query against resolver should work
 drill @127.0.0.1 example.test A || true
 ```
-**Expected:** resolver can query authoritative via `dns_core` and answer client queries.
+**Expected:** resolver can query both parent and child via `dns_core` and answer client queries.
 
 ---
 
@@ -148,6 +153,21 @@ Better (explicit validation report):
 docker exec -it dns_client sh -lc "apk add --no-cache bind-tools >/dev/null 2>&1 || true; delv @172.32.0.20 example.test A"
 ```
 **Expected:** `delv` reports validation success.
+
+#### DNSSEC chain of trust (private lab, parent + child)
+- **Authoritative #1 (parent):** serves `test.`
+- **Authoritative #2 (child):** serves `example.test.` (signed)
+- **Resolver (Unbound):** trust-anchor = `test.` and validates `www.example.test` via:
+  `test (TA) -> DS(example.test) -> DNSKEY(example.test) -> RRSIG(A)`
+
+Implementation note:
+- `anchors/test.key` is written by the `anchor_export` service from the parent KSK.
+- If you delete `bind9_parent/keys`, restart the lab so `anchor_export` rewrites `anchors/test.key`.
+- If the child KSK changes, run DS recompute and restart the parent:
+  `docker compose run --rm ds_recompute`
+  `docker compose restart authoritative_parent`
+  The `ds_recompute` service runs automatically on `docker compose up -d` and
+  restarts the parent only if the DS changes.
 
 ---
 
@@ -170,7 +190,8 @@ set -euo pipefail
 
 RES_TRUSTED="172.32.0.20"
 RES_UNTRUSTED="172.33.0.20"
-AUTH="172.31.0.10"
+AUTH_PARENT="172.31.0.10"
+AUTH_CHILD="172.31.0.11"
 
 pass(){ echo "✅ PASS: $1"; }
 fail(){ echo "❌ FAIL: $1"; exit 1; }
@@ -184,10 +205,15 @@ out2="$(docker exec dns_untrusted sh -lc "dig +time=1 +tries=1 @${RES_UNTRUSTED}
 echo "$out2" | grep -Eq "status: REFUSED|connection timed out|no servers could be reached" \
   && pass "untrusted recursion blocked" || fail "untrusted recursion blocked"
 
-echo "[3] Client should not reach authoritative directly (segmentation)..."
-out3="$(docker exec dns_client sh -lc "dig +time=1 +tries=1 @${AUTH} example.test SOA" || true)"
+echo "[3] Client should not reach parent authoritative (segmentation)..."
+out3="$(docker exec dns_client sh -lc "dig +time=1 +tries=1 @${AUTH_PARENT} test SOA" || true)"
 echo "$out3" | grep -Eq "connection timed out|no servers could be reached" \
-  && pass "auth isolated from client_net" || fail "auth isolated from client_net"
+  && pass "parent auth isolated from client_net" || fail "parent auth isolated from client_net"
+
+echo "[4] Client should not reach child authoritative (segmentation)..."
+out4="$(docker exec dns_client sh -lc "dig +time=1 +tries=1 @${AUTH_CHILD} example.test SOA" || true)"
+echo "$out4" | grep -Eq "connection timed out|no servers could be reached" \
+  && pass "child auth isolated from client_net" || fail "child auth isolated from client_net"
 
 echo "All smoke tests completed."
 ```
@@ -200,7 +226,7 @@ chmod +x smoke_test_dns_lab.sh
 
 ---
 
-## 5)  evidence checklist (what to screenshot / include)
+## 5)  evidence checklist 
 
 ### 5.1 Topology proof
 - Output (screenshot) of:

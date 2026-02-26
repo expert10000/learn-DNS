@@ -4,4 +4,10 @@ bind9/keys/
 bind9/zones/*.signed
 bind9/zones/*.jnl
 bind9/zones/*.jbk
+bind9_parent/log/
+bind9_parent/keys/
+bind9_parent/zones/*.signed
+bind9_parent/zones/*.jnl
+bind9_parent/zones/*.jbk
 unbound/log/
+anchors/test.key

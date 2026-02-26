@@ -1,10 +1,12 @@
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -46,6 +48,19 @@ CONFIG_DIRS = {
 }
 MAX_CONFIG_BYTES = 200_000
 
+CAPTURE_DIR = Path("/captures")
+CAPTURE_TARGETS = {
+    "resolver": os.getenv("CAPTURE_RESOLVER_CONTAINER", "dns_capture_resolver"),
+    "authoritative": os.getenv(
+        "CAPTURE_AUTHORITATIVE_CONTAINER", "dns_capture_authoritative"
+    ),
+}
+CAPTURE_FILTERS = {
+    "dns": "port 53",
+    "dns+dot": "port 53 or port 853",
+    "all": "",
+}
+
 class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
     name: str = Field(..., examples=["example.org"])
@@ -75,6 +90,36 @@ class ConfigFileResponse(BaseModel):
     size: int
     truncated: bool
     content: str
+
+class CaptureStartRequest(BaseModel):
+    target: Literal["resolver", "authoritative"]
+    filter: Literal["dns", "dns+dot", "all"] = "dns"
+
+class CaptureStartResponse(BaseModel):
+    ok: bool
+    target: Literal["resolver", "authoritative"]
+    file: str
+    filter: str
+    command: str
+
+class CaptureStopRequest(BaseModel):
+    target: Literal["resolver", "authoritative"]
+
+class CaptureStopResponse(BaseModel):
+    ok: bool
+    target: Literal["resolver", "authoritative"]
+    file: Optional[str] = None
+
+class CaptureFileInfo(BaseModel):
+    file: str
+    size: int
+    mtime: str
+    target: Literal["resolver", "authoritative"]
+
+class CaptureListResponse(BaseModel):
+    ok: bool
+    files: list[CaptureFileInfo]
+    running: dict[str, bool]
 
 def require_key(x_api_key: Optional[str]):
     if not API_KEY:
@@ -131,6 +176,42 @@ def resolve_config_path(rel_path: str) -> Path:
         except ValueError:
             continue
     raise HTTPException(status_code=403, detail="Path not allowed")
+
+def docker_exec(container: str, sh_cmd: str, timeout_s: int = 8) -> CmdResponse:
+    return run_cmd(["docker", "exec", container, "sh", "-lc", sh_cmd], timeout_s)
+
+def capture_pid_file(target: str) -> str:
+    return f"/tmp/capture_{target}.pid"
+
+def capture_file_file(target: str) -> str:
+    return f"/tmp/capture_{target}.file"
+
+def capture_log_file(target: str) -> str:
+    return f"/tmp/capture_{target}.log"
+
+def capture_running(target: Literal["resolver", "authoritative"]) -> bool:
+    container = CAPTURE_TARGETS[target]
+    pid_path = capture_pid_file(target)
+    check_cmd = (
+        f"if [ -f {pid_path} ]; then "
+        f"pid=$(cat {pid_path}); "
+        "if kill -0 $pid >/dev/null 2>&1; then echo RUNNING; else echo STALE; fi; "
+        "fi"
+    )
+    result = docker_exec(container, check_cmd)
+    if result.exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=result.stderr or f"Failed to check capture on {target}",
+        )
+    if "STALE" in result.stdout:
+        docker_exec(container, f"rm -f {pid_path}")
+        return False
+    return "RUNNING" in result.stdout
+
+def ensure_capture_dir():
+    if not CAPTURE_DIR.exists():
+        raise HTTPException(status_code=500, detail="Capture directory not mounted")
 
 @app.get("/health")
 def health():
@@ -200,4 +281,127 @@ def config_file(path: str, x_api_key: Optional[str] = Header(default=None)):
         size=full.stat().st_size,
         truncated=truncated,
         content=content,
+    )
+
+@app.post("/capture/start", response_model=CaptureStartResponse)
+def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    ensure_capture_dir()
+
+    if req.filter not in CAPTURE_FILTERS:
+        raise HTTPException(status_code=400, detail="Invalid filter")
+
+    if capture_running(req.target):
+        raise HTTPException(status_code=409, detail=f"{req.target} capture already running")
+
+    container = CAPTURE_TARGETS[req.target]
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"{req.target}-{ts}.pcap"
+    filter_expr = CAPTURE_FILTERS[req.filter]
+    base_cmd = f"tcpdump -i any -s 0 -U -w /captures/{filename}"
+    if filter_expr:
+        base_cmd = f"{base_cmd} {filter_expr}"
+
+    pid_path = capture_pid_file(req.target)
+    file_path = capture_file_file(req.target)
+    log_path = capture_log_file(req.target)
+    sh_cmd = (
+        f"nohup {base_cmd} >{log_path} 2>&1 & "
+        f"echo $! > {pid_path}; "
+        f"echo {filename} > {file_path}"
+    )
+    result = docker_exec(container, sh_cmd)
+    if result.exit_code != 0:
+        raise HTTPException(status_code=500, detail=result.stderr or "Failed to start capture")
+
+    return CaptureStartResponse(
+        ok=True,
+        target=req.target,
+        file=filename,
+        filter=req.filter,
+        command=base_cmd,
+    )
+
+@app.post("/capture/stop", response_model=CaptureStopResponse)
+def capture_stop(req: CaptureStopRequest, x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    ensure_capture_dir()
+
+    container = CAPTURE_TARGETS[req.target]
+    pid_path = capture_pid_file(req.target)
+    file_path = capture_file_file(req.target)
+    sh_cmd = (
+        f"if [ ! -f {pid_path} ]; then exit 2; fi; "
+        f"pid=$(cat {pid_path}); "
+        f"file=$(cat {file_path} 2>/dev/null || true); "
+        f"kill -2 $pid >/dev/null 2>&1 || true; "
+        "sleep 1; "
+        f"rm -f {pid_path}; "
+        "echo $file"
+    )
+    result = docker_exec(container, sh_cmd)
+    if result.exit_code == 2:
+        raise HTTPException(status_code=404, detail="No running capture")
+    if result.exit_code != 0:
+        raise HTTPException(status_code=500, detail=result.stderr or "Failed to stop capture")
+
+    filename = result.stdout.strip() or None
+    return CaptureStopResponse(ok=True, target=req.target, file=filename)
+
+@app.get("/capture/list", response_model=CaptureListResponse)
+def capture_list(
+    target: Optional[Literal["resolver", "authoritative"]] = None,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+    ensure_capture_dir()
+
+    files: list[CaptureFileInfo] = []
+    for path in CAPTURE_DIR.glob("*.pcap"):
+        name = path.name
+        if name.startswith("resolver-"):
+            file_target = "resolver"
+        elif name.startswith("authoritative-"):
+            file_target = "authoritative"
+        else:
+            continue
+        if target and target != file_target:
+            continue
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+        files.append(
+            CaptureFileInfo(
+                file=name,
+                size=path.stat().st_size,
+                mtime=mtime,
+                target=file_target,
+            )
+        )
+
+    files.sort(key=lambda f: f.mtime, reverse=True)
+    running = {
+        "resolver": capture_running("resolver"),
+        "authoritative": capture_running("authoritative"),
+    }
+    return CaptureListResponse(ok=True, files=files, running=running)
+
+@app.get("/capture/download")
+def capture_download(
+    file: str,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+    ensure_capture_dir()
+
+    if not file or "/" in file or ".." in file:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    full = (CAPTURE_DIR / file).resolve()
+    if not full.exists() or not full.is_file():
+        raise HTTPException(status_code=404, detail="Capture not found")
+    if CAPTURE_DIR not in full.parents:
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    return FileResponse(
+        full,
+        filename=file,
+        media_type="application/vnd.tcpdump.pcap",
     )

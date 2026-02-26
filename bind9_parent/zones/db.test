@@ -1,0 +1,18 @@
+$TTL 300
+@   IN SOA ns1.test. admin.test. (
+        2026022606 ; serial
+        1h         ; refresh
+        15m        ; retry
+        1w         ; expire
+        5m         ; negative caching
+)
+    IN NS  ns1.test.
+
+ns1 IN A   172.31.0.10
+
+; Delegate example.test to the child authoritative.
+example  IN NS  ns1.example.test.
+example  IN DS  2860 13 2 8E1BB8CCCDDD8EBAB5FBFFF7A949B5810ED3DD577C835CFA1F20421E5CBB8F60
+
+; Glue for the child NS.
+ns1.example.test. IN A 172.31.0.11

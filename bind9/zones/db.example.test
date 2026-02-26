@@ -1,6 +1,6 @@
 $TTL 300
 @   IN SOA ns1.example.test. admin.example.test. (
-        2026022501 ; serial
+        2026022601 ; serial
         1h         ; refresh
         15m        ; retry
         1w         ; expire
@@ -8,5 +8,5 @@ $TTL 300
 )
     IN NS  ns1.example.test.
 
-ns1 IN A   172.31.0.10
-www IN A   172.31.0.10
+ns1 IN A   172.31.0.11
+www IN A   172.31.0.11
