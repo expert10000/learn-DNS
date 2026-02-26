@@ -227,3 +227,11 @@ Create a table in the thesis:
 | T6 | Localhost-only publish | `dig @127.0.0.1 -p 5300 ...` | OK local | ... |
 
 ---
+
+
+
+
+docker pull internetsystemsconsortium/bind9:9.18
+docker pull mvance/unbound:1.20.0
+docker pull alpine:3.20
+docker pull nicolaka/netshoot:latest

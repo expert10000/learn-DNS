@@ -35,33 +35,31 @@ services:
     volumes:
       - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
-      - ./unbound/example.test.key:/opt/unbound/etc/unbound/example.test.key:ro
       - ./unbound/log:/var/log/unbound
-    # Optional: expose ONLY to localhost on the VM (host-side dig via tunnel)
+    # Optional: expose ONLY to localhost if you want to dig from host OS:
     ports:
       - "127.0.0.1:5300:53/udp"
       - "127.0.0.1:5300:53/tcp"
 
   client:
-    build:
-      context: ./client_tools
-    image: dns-client-tools:latest
+    image: alpine:3.20
     container_name: dns_client
-    command: ["sh", "-lc", "sleep infinity"]
+    command: ["sh", "-lc", "apk update || true; apk add --no-cache bind-tools || true; sleep infinity"]
     networks:
       client_net:
         ipv4_address: 172.32.0.50
+    # Use this to run dig and basic checks from "trusted" network.
 
   untrusted:
-    build:
-      context: ./client_tools
-    image: dns-client-tools:latest
+    image: alpine:3.20
     container_name: dns_untrusted
-    command: ["sh", "-lc", "sleep infinity"]
+    command: ["sh", "-lc", "apk update || true; apk add --no-cache bind-tools || true; sleep infinity"]
     networks:
       untrusted_net:
         ipv4_address: 172.33.0.50
+    # Use this to verify recursion is blocked for untrusted segment.
 
+  # Optional: lightweight packet capture / debug (lab only)
   toolbox:
     image: nicolaka/netshoot:latest
     container_name: dns_toolbox
@@ -75,53 +73,6 @@ services:
         ipv4_address: 172.31.0.60
       untrusted_net:
         ipv4_address: 172.33.0.60
-
-  # -------------------------
-  # Option 1: Portainer (GUI exec/logs)
-  # -------------------------
-  portainer:
-    image: portainer/portainer-ce:latest
-    container_name: dns_portainer
-    restart: unless-stopped
-    networks:
-      mgmt_net:
-        ipv4_address: 172.30.0.10
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    # Bind ONLY to localhost of the VM
-    ports:
-      - "127.0.0.1:9443:9443"
-      - "127.0.0.1:9000:9000"
-
-  # -------------------------
-  # Option 2: ONE management API for React (enable via profile "api")
-  # No FastAPI on each node; only here.
-  # -------------------------
-  lab_api:
-    profiles: ["api"]
-    build: ./lab_api
-    container_name: dns_lab_api
-    restart: unless-stopped
-    environment:
-      - LAB_API_KEY=change_me_long_random
-    networks:
-      client_net:
-        ipv4_address: 172.32.0.90
-      untrusted_net:
-        ipv4_address: 172.33.0.90
-      mgmt_net:
-        ipv4_address: 172.30.0.90
-    # Bind ONLY to localhost of the VM
-    ports:
-      - "127.0.0.1:8000:8000"
-    # Optional: allow API to show logs via HTTP (read-only)
-    volumes:
-      - ./bind9/log:/logs/bind:ro
-      - ./unbound/log:/logs/unbound:ro
-
-volumes:
-  portainer_data:
 
 networks:
   mgmt_net:
