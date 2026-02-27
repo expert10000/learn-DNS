@@ -201,6 +201,16 @@ class ResolverRestartResponse(BaseModel):
     stdout: str
     stderr: str
 
+class ResolverFlushRequest(BaseModel):
+    zone: str = "example.test"
+
+class ResolverFlushResponse(BaseModel):
+    ok: bool
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
 def require_key(x_api_key: Optional[str]):
     if not API_KEY:
         raise HTTPException(status_code=500, detail="Server missing LAB_API_KEY env")
@@ -404,7 +414,8 @@ def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(de
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"{req.target}-{ts}.pcap"
     filter_expr = CAPTURE_FILTERS[req.filter]
-    iface = "eth0" if req.target == "authoritative" else "any"
+    # "any" is safest across Docker network_mode setups where eth0 may not exist.
+    iface = "any"
     base_cmd = f"tcpdump -i {iface} -s 0 -U -w /captures/{filename}"
     if filter_expr:
         base_cmd = f"{base_cmd} {filter_expr}"
@@ -518,6 +529,26 @@ def resolver_restart(x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
     res = docker_cmd(["restart", RESOLVER_CONTAINER], timeout_s=20)
     return ResolverRestartResponse(
+        ok=res.ok,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.post("/resolver/flush", response_model=ResolverFlushResponse)
+def resolver_flush(
+    req: ResolverFlushRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    zone = validate_name(req.zone)
+    res = docker_exec(
+        RESOLVER_CONTAINER,
+        f"/opt/unbound/sbin/unbound-control -c /opt/unbound/etc/unbound/unbound.conf "
+        f"flush_zone {zone}",
+        timeout_s=8,
+    )
+    return ResolverFlushResponse(
         ok=res.ok,
         command=res.command,
         exit_code=res.exit_code,

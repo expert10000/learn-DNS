@@ -10,21 +10,21 @@ This document describes the key rotation behavior that is actually implemented i
 - DS management: helper script + one-shot service (`scripts/recompute_ds.py`, `docker-compose.yml`)
 
 ## What We Actually Implement
-- **BIND auto-signing with the default DNSSEC policy** for both parent and child zones:
+- BIND auto-signing with the default DNSSEC policy for both parent and child zones:
   - `dnssec-policy default;`
   - `inline-signing yes;`
   - BIND generates and rolls keys according to its built-in defaults.
-- **Automatic DS recompute on startup** for child KSK changes:
+- Automatic DS recompute on startup for child KSK changes:
   - `ds_recompute` runs during `docker compose up -d`.
-  - It computes the child’s current KSK DS and patches the parent zone if needed.
-- **Trust anchor export on startup** for parent KSK:
+  - It computes the child's current KSK DS and patches the parent zone if needed.
+- Trust anchor export on startup for parent KSK:
   - `anchor_export` writes the parent KSK DNSKEY to `anchors/test.key`.
   - Unbound waits for this file before starting.
-- **Unbound validation wiring**:
+- Unbound validation wiring:
   - `module-config: "validator iterator"` (validator must come first).
-  - `local-zone: "test." nodefault` to override Unbound’s built-in RFC 2606 `.test` local-zone.
+  - `local-zone: "test." nodefault` to override Unbound's built-in RFC 2606 `.test` local-zone.
 
-There is **no periodic scheduler** for DS or trust-anchor refresh while the stack is running. If a rollover happens while containers are already up, you must run the recompute/export steps manually (details below).
+There is no periodic scheduler for DS or trust-anchor refresh while the stack is running. If a rollover happens while containers are already up, you must run the recompute/export steps manually (details below).
 
 ## Where Keys Live
 - Parent keys: `bind9_parent/keys/`
@@ -36,23 +36,23 @@ There is **no periodic scheduler** for DS or trust-anchor refresh while the stac
 BIND stores DNSSEC key material under each `key-directory`, and inline-signs the zone with the active keys.
 
 ## Child KSK Rotation and DS Update Flow
-When the **child KSK changes**, the parent DS must be updated. Our implementation is:
+When the child KSK changes, the parent DS must be updated. Our implementation is:
 
 1. `ds_recompute` runs `python scripts/recompute_ds.py --wait 120 --exit-code-on-change`
 2. `recompute_ds.py`:
-   - Scans `bind9/keys` for a **KSK** record (`DNSKEY 257`) for `example.test`
-   - Computes DS using **SHA-256** (digest type 2)
+   - Scans `bind9/keys` for a KSK record (`DNSKEY 257`) for `example.test`
+   - Computes DS using SHA-256 (digest type 2)
    - Updates the DS record in `bind9_parent/zones/db.test`
    - Bumps the SOA serial
    - Exits with code `10` if the DS changed
-3. The `ds_recompute` service restarts `dns_authoritative_parent` **only if the DS changed**.
+3. The `ds_recompute` service restarts `dns_authoritative_parent` only if the DS changed.
 
 This is the only automated DS update path in the lab.
 
 ### DS Computation Details (from `scripts/recompute_ds.py`)
-- **Keytag calculation**: computed from the DNSKEY RDATA.
-- **Digest**: SHA-256 over the owner name wire format + DNSKEY RDATA.
-- **Record format** inserted/updated:
+- Keytag calculation: computed from the DNSKEY RDATA.
+- Digest: SHA-256 over the owner name wire format + DNSKEY RDATA.
+- Record format inserted/updated:
   ```
   example  IN DS  <keytag> <alg> 2 <digest>
   ```
@@ -64,10 +64,10 @@ Unbound needs a trust anchor for `test.`. The implementation is:
 - `anchor_export` waits for a parent KSK (`Ktest.+013+*.key` containing `DNSKEY 257`) and copies it to `anchors/test.key`.
 - `unbound/start.sh` waits for `anchors/test.key` before launching Unbound.
 
-If the parent KSK changes while the stack is already running, the **validating** resolver will **not** automatically refresh the trust anchor. You must re-export and restart it (details below).
+If the parent KSK changes while the stack is already running, the validating resolver will not automatically refresh the trust anchor. You must re-export and restart it (details below).
 
 ## Manual Rotation Procedures (What We Support)
-These steps match the lab’s current implementation. They assume you want to force a new keyset and keep the chain of trust intact.
+These steps match the lab's current implementation. They assume you want to force a new keyset and keep the chain of trust intact.
 
 ### Force child key regeneration and DS update
 1. Stop the stack (optional but safer for deterministic results):
@@ -121,24 +121,24 @@ After any rotation, validate both DS continuity and resolver validation:
   ```
 
 ## Important Limitations (Current Behavior)
-- **No periodic DS recompute** while the lab is running.
+- No periodic DS recompute while the lab is running.
   - `ds_recompute` runs on `docker compose up -d` or when manually invoked.
-- **No automatic trust-anchor refresh** for parent KSK rollover.
+- No automatic trust-anchor refresh for parent KSK rollover.
   - `anchor_export` runs on `docker compose up -d` or when manually invoked.
-- **Key rollover schedule** is controlled by BIND’s built-in `dnssec-policy default`.
+- Key rollover schedule is controlled by BIND's built-in `dnssec-policy default`.
   - We do not override timing or lifecycle parameters in this lab.
 
 ## Architecture Confirmation (As Implemented)
 The lab is built exactly as follows:
-- **Two authoritative servers**:
+- Two authoritative servers:
   - `authoritative_parent` serves `test.` (signed)
   - `authoritative_child` serves `example.test.` (signed)
-- **Delegation + DS**:
+- Delegation + DS:
   - `test.` delegates `example.test.` with `NS` + `DS(example.test)`
-- **Child NS name**:
+- Child NS name:
   - Delegation uses an in-parent NS name (`ns-child.test.`) to avoid unsigned glue.
-- **Two resolvers**:
-  - `resolver` (validating) trusts **only** `test.` via `anchors/test.key`
+- Two resolvers:
+  - `resolver` (validating) trusts only `test.` via `anchors/test.key`
   - `resolver_plain` (non-validating) has no trust anchor and runs `module-config: "iterator"`
 
 ## Scheduled Workflow (Optional)
@@ -146,7 +146,7 @@ If you want a recurring refresh to catch KSK rollovers while the lab stays up, s
 - `ds_recompute` (child KSK -> parent DS update)
 - `anchor_export` + `resolver` restart (parent KSK -> trust anchor refresh)
 
-This does **not** change BIND’s rollover timing; it just keeps the parent DS and resolver trust anchor in sync.
+This does not change BIND's rollover timing; it just keeps the parent DS and resolver trust anchor in sync.
 
 ### Option A: Cron (Linux/macOS)
 Create a daily job (example: 03:15):
@@ -168,37 +168,9 @@ docker compose restart resolver
 
 ### Notes
 - These jobs are safe to run even if no keys changed; `ds_recompute` exits cleanly when DS is already current.
-more frequent checks, shorten the schedule (e.g., every 6 hours).
+- For more frequent checks, shorten the schedule (e.g., every 6 hours).
 
-
-
-
-
-
-Run Query (NSEC3 Proof / NXDOMAIN)
-
-Inline NSEC mode (default):
-status: NXDOMAIN
-flags: qr rd ra ad
-AUTHORITY: SOA + RRSIG + NSEC + RRSIG
-
-Offline NSEC3 mode:
-status: NXDOMAIN
-flags: qr rd ra ad
-AUTHORITY: SOA + RRSIG + NSEC3 + RRSIG + NSEC3PARAM
-
-Run Demo (Aggressive NSEC)
-
-Query 1: nope1.example.test → NXDOMAIN + (NSEC or NSEC3)
-Query 2: nope2.example.test → NXDOMAIN + (from cache)
-This demo’s goal is to show that the second NXDOMAIN can be synthesized from cached denial records, reducing upstream authoritative queries. To prove that, you’d normally watch tcpdump or authoritative logs and see fewer upstream queries on the second request.
-
-What the buttons do in the UI
-Run Query: runs a single NXDOMAIN query with DNSSEC enabled against the validating resolver (nope1.example.test).
-Run Demo: runs two NXDOMAIN queries in a row (nope1, then nope2). With aggressive NSEC enabled, the second should be answered from cached denial data.
-The UI indicator now checks the signed zone file when available, so it reflects the actual signing mode.
-
-Switching between NSEC and NSEC3
+## Switching Between NSEC and NSEC3
 
 Inline NSEC (default):
 ```powershell
@@ -221,16 +193,68 @@ Linux/macOS:
 ./scripts/set_signing_mode.sh nsec3 --run-signer
 ```
 
+Offline mode behavior (one-shot signer)
+- Offline NSEC3 is not a long-running service. The signer runs once to produce
+  `db.*.signed`, then BIND serves those pre-signed files.
+- Inline mode must not load offline `.signed` files. If you switch back to
+  inline NSEC, remove any `db.*.signed` and `db.*.signed.jnl` files or BIND will
+  fail to load the zone and clients will see SERVFAIL.
+
+Cleanup after switching back to inline NSEC (Windows PowerShell):
+```powershell
+Remove-Item -Force .\bind9_parent\zones\db.test.signed, .\bind9_parent\zones\db.test.signed.jnl
+Remove-Item -Force .\bind9\zones\db.example.test.signed, .\bind9\zones\db.example.test.signed.jnl
+docker compose restart authoritative_parent authoritative_child
+```
+
 UI switch (online):
 - Use the "Switch to NSEC3 (offline)" and "Switch to NSEC (inline)" buttons.
 - The UI triggers the Lab API to apply the config, sign zones (NSEC3), and restart components.
 - Refresh indicators after switching to confirm the active mode.
 
-Aggressive NSEC proof (UI):
-- Use "Run Demo + Proof" to capture authoritative traffic during two NXDOMAIN queries.
-- The UI shows how many upstream queries hit the authoritative server (should be 1).
-- Optionally restart the resolver first to clear cache for a cleaner proof.
-
 Notes:
 - Offline NSEC3 uses `dnssec-signzone -3` via `docker compose run --rm signer`.
-- `anchor_export` now supports both BIND-managed keys (`.state`) and offline key files (`.key`).
+- `anchor_export` supports both BIND-managed keys (`.state`) and offline key files (`.key`).
+
+## UI Demos (As Implemented)
+
+### NSEC3 Proof (NXDOMAIN)
+Run Query uses the validating resolver against a non-existent name.
+
+Inline NSEC (default) expected authority:
+- `SOA + RRSIG + NSEC + RRSIG`
+
+Offline NSEC3 expected authority:
+- `SOA + RRSIG + NSEC3 + RRSIG + NSEC3PARAM`
+
+### Aggressive NSEC Demo
+Run Demo fires two NXDOMAIN queries in a row; the second should be synthesized
+from cached denial proofs.
+
+Run Demo + Proof:
+- Captures authoritative traffic and summarizes upstream queries.
+- Uses the authoritative capture target in the Lab API.
+
+Cache controls:
+- Restart resolver (clear cache): full cold cache.
+- Flush resolver cache (example.test): clears only the `example.test` zone.
+
+Upstream query count:
+- Cold cache usually shows 2 (DNSKEY + NXDOMAIN proof).
+- If you want the summary to show 1, pre-warm DNSKEY first:
+  `dig @172.32.0.20 example.test DNSKEY +dnssec`
+
+### QNAME Minimization (Privacy)
+QNAME minimization is enabled in `unbound/unbound.conf` via
+`qname-minimisation: yes`.
+
+UI demo:
+- Use the QNAME Minimization (Privacy) preset (e.g., `deep.sub.example.test`).
+- Check the QNAME indicator to confirm minimisation is enabled.
+
+## Future Improvement
+Option A: add a dedicated aggressive demo resolver that is authoritative for
+`example.test` via auth-zone (using the signed zone file), and wire the UI
+"Run Demo + Proof" to that resolver. Result: upstream queries drop to 0 (local
+authoritative + cached NSEC/NSEC3), giving a clean, repeatable demo without
+breaking the main resolver.

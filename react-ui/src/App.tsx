@@ -63,9 +63,11 @@ type IndicatorState = {
   nsec3Child?: boolean;
   nsec3Parent?: boolean;
   aggressiveNsec?: boolean;
+  qnameMinim?: boolean;
   childDetail?: string;
   parentDetail?: string;
   aggressiveDetail?: string;
+  qnameDetail?: string;
   updatedAt?: string;
 };
 
@@ -288,6 +290,15 @@ function parseAggressiveNsec(content: string) {
   return { enabled, detail: `aggressive-nsec: ${match[1].toLowerCase()}` };
 }
 
+function parseQnameMinimisation(content: string) {
+  const match = content.match(/qname-minimisation\s*:\s*(yes|no)/i);
+  if (!match) {
+    return { enabled: false, detail: 'setting not found' };
+  }
+  const enabled = match[1].toLowerCase() === 'yes';
+  return { enabled, detail: `qname-minimisation: ${match[1].toLowerCase()}` };
+}
+
 function parseNsecInterval(output: string) {
   for (const line of output.split('\n')) {
     const match = line.match(/^(\S+)\s+\d+\s+IN\s+NSEC\s+(\S+)/i);
@@ -392,6 +403,7 @@ export default function App() {
   const [proofOutput, setProofOutput] = useState('');
   const [proofCaptureFile, setProofCaptureFile] = useState('');
   const [proofColdCache, setProofColdCache] = useState(true);
+  const [proofFlushCache, setProofFlushCache] = useState(false);
   const [indicators, setIndicators] = useState<IndicatorState>({
     loading: false,
     message: 'Not loaded.',
@@ -540,6 +552,36 @@ export default function App() {
     await runDigWithRequest(request, 'Running NSEC3 proof query...');
   };
 
+  const applyQnameMinPreset = () => {
+    setReq({
+      ...req,
+      resolver: 'valid',
+      name: 'deep.sub.example.test',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    });
+    setStatus('Loaded QNAME minimization preset.');
+  };
+
+  const runQnameMin = async () => {
+    const request: DigRequest = {
+      ...req,
+      resolver: 'valid',
+      name: 'deep.sub.example.test',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    };
+    setReq(request);
+    await runDigWithRequest(request, 'Running QNAME minimization query...');
+    if (!missingLabKey) {
+      await loadIndicators();
+    }
+  };
+
   const runAggressiveNsecDemo = async () => {
     const base: DigRequest = {
       ...req,
@@ -627,6 +669,14 @@ export default function App() {
           labHeaders
         );
         await new Promise((resolve) => setTimeout(resolve, 3000));
+      } else if (proofFlushCache) {
+        setProofStatus('Flushing resolver cache (example.test)...');
+        await postJson<LabDigResponse>(
+          `${LAB_API_BASE}/resolver/flush`,
+          { zone: 'example.test' },
+          labHeaders
+        );
+        await new Promise((resolve) => setTimeout(resolve, 800));
       }
 
       setProofStatus('Starting authoritative capture...');
@@ -837,9 +887,11 @@ export default function App() {
     let childEnabled: boolean | undefined;
     let parentEnabled: boolean | undefined;
     let aggressiveEnabled: boolean | undefined;
+    let qnameEnabled: boolean | undefined;
     let childDetail = '';
     let parentDetail = '';
     let aggressiveDetail = '';
+    let qnameDetail = '';
     const isNotFound = (err: unknown) =>
       (err as Error).message.toLowerCase().includes('http 404');
     const loadZoneIndicator = async (
@@ -899,9 +951,14 @@ export default function App() {
       const parsed = parseAggressiveNsec(unbound.content);
       aggressiveEnabled = parsed.enabled;
       aggressiveDetail = parsed.detail;
+      const qnameParsed = parseQnameMinimisation(unbound.content);
+      qnameEnabled = qnameParsed.enabled;
+      qnameDetail = qnameParsed.detail;
     } catch (err) {
       aggressiveEnabled = undefined;
       aggressiveDetail = (err as Error).message;
+      qnameEnabled = undefined;
+      qnameDetail = (err as Error).message;
     }
 
     setIndicators({
@@ -910,9 +967,11 @@ export default function App() {
       nsec3Child: childEnabled,
       nsec3Parent: parentEnabled,
       aggressiveNsec: aggressiveEnabled,
+      qnameMinim: qnameEnabled,
       childDetail,
       parentDetail,
       aggressiveDetail,
+      qnameDetail,
       updatedAt: new Date().toLocaleString(),
     });
   };
@@ -1211,11 +1270,16 @@ export default function App() {
             <span className="indicator-dot" />
             Aggressive NSEC: {formatIndicator(indicators.aggressiveNsec)}
           </div>
+          <div className={`indicator ${indicatorClass(indicators.qnameMinim)}`}>
+            <span className="indicator-dot" />
+            QNAME Minimization: {formatIndicator(indicators.qnameMinim)}
+          </div>
         </div>
         <div className="indicator-meta">
           <div>Child: {indicators.childDetail || 'not checked'}</div>
           <div>Parent: {indicators.parentDetail || 'not checked'}</div>
           <div>Aggressive: {indicators.aggressiveDetail || 'not checked'}</div>
+          <div>QNAME: {indicators.qnameDetail || 'not checked'}</div>
           <div>
             Status: {indicators.message}{' '}
             {indicators.updatedAt ? `(${indicators.updatedAt})` : ''}
@@ -1261,6 +1325,20 @@ export default function App() {
             </div>
           </div>
           <div className="preset">
+            <div className="preset-title">QNAME Minimization (Privacy)</div>
+            <div className="preset-desc">
+              Query a deep name; check the QNAME indicator to confirm minimisation.
+            </div>
+            <div className="actions">
+              <button onClick={applyQnameMinPreset} disabled={isBusy}>
+                Load Preset
+              </button>
+              <button onClick={runQnameMin} disabled={isBusy}>
+                Run Query
+              </button>
+            </div>
+          </div>
+          <div className="preset">
           <div className="preset-title">Aggressive NSEC Demo</div>
           <div className="preset-desc">
             Runs two NXDOMAIN queries; the second should be synthesized from cached
@@ -1289,9 +1367,27 @@ export default function App() {
             <input
               type="checkbox"
               checked={proofColdCache}
-              onChange={(e) => setProofColdCache(e.target.checked)}
+              onChange={(e) => {
+                setProofColdCache(e.target.checked);
+                if (e.target.checked) {
+                  setProofFlushCache(false);
+                }
+              }}
             />
             Restart resolver (clear cache)
+          </label>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={proofFlushCache}
+              onChange={(e) => {
+                setProofFlushCache(e.target.checked);
+                if (e.target.checked) {
+                  setProofColdCache(false);
+                }
+              }}
+            />
+            Flush resolver cache (example.test)
           </label>
         </div>
       </div>

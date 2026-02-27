@@ -302,8 +302,7 @@ services:
     image: internetsystemsconsortium/bind9:9.18
     container_name: dns_signing_switcher
     restart: unless-stopped
-    entrypoint: ["sh", "-lc"]
-    command: "sleep infinity"
+    entrypoint: ["sh", "-lc", "sleep 315360000"]
     volumes:
       - ./scripts:/switcher:ro
       - ./bind9:/bind9

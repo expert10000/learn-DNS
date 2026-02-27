@@ -175,3 +175,4 @@ docker compose restart authoritative_parent
 Notes:
 - The service restarts `authoritative_parent` only when the DS changes.
 - It uses the Docker socket to restart the container.
+
