@@ -26,3 +26,4 @@ App runs at `http://localhost:5173` and uses:
 ## Notes
 - Use `npm run dev -- --host` if you want LAN access.
 - The API services are expected to be running via `docker compose up -d`.
+- The UI includes a **Resolver** selector to target the validating or plain Unbound.

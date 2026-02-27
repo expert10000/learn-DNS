@@ -14,7 +14,8 @@ This single Markdown document contains:
 ### Containers
 - `dns_authoritative_parent` — BIND9 authoritative for `test.` (DNSSEC auto-signing enabled)
 - `dns_authoritative_child` — BIND9 authoritative for `example.test.` (DNSSEC auto-signing enabled)
-- `dns_resolver` — Unbound recursive resolver with DNSSEC validation
+- `dns_resolver` — Unbound recursive resolver with DNSSEC validation (validating)
+- `dns_resolver_plain` — Unbound recursive resolver without DNSSEC validation (plain)
 - `dns_client` — trusted test box with `dig`
 - `dns_untrusted` — untrusted test box with `dig`
 - `dns_toolbox` — optional netshoot container for troubleshooting
@@ -22,13 +23,16 @@ This single Markdown document contains:
 ### IP plan (example)
 - Authoritative (parent/test): `172.31.0.10`
 - Authoritative (child/example.test): `172.31.0.11`
-- Resolver (trusted iface): `172.32.0.20`
-- Resolver (untrusted iface): `172.33.0.20`
-- Resolver (mgmt iface): `172.30.0.20`
+- Resolver (valid/trusted): `172.32.0.20`
+- Resolver (valid/untrusted): `172.33.0.20`
+- Resolver (valid/mgmt): `172.30.0.20`
+- Resolver (plain/trusted): `172.32.0.21`
+- Resolver (plain/untrusted): `172.33.0.21`
+- Resolver (plain/mgmt): `172.30.0.21`
 
 ### Host exposure
-- Resolver is published to host **localhost only**:
-  - `127.0.0.1:5300` (TCP/UDP 53)
+- Validating resolver is published to host **localhost only**: `127.0.0.1:5300` (TCP/UDP 53)
+- Plain resolver is published to host **localhost only**: `127.0.0.1:5301` (TCP/UDP 53)
 
 ---
 
@@ -53,6 +57,7 @@ docker network inspect dns-security-lab_mgmt_net
 ### 1.3 Show each container’s IP on every attached network
 ```bash
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_resolver
+docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_resolver_plain
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_authoritative_parent
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_authoritative_child
 docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}}={{$v.IPAddress}} {{end}}' dns_client
@@ -71,6 +76,11 @@ docker inspect -f '{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}| {{$k}
 ### 2.1 tcpdump inside the resolver (quick live view)
 ```bash
 docker exec -it dns_resolver sh -lc "apk add --no-cache tcpdump >/dev/null 2>&1 || true; tcpdump -ni any port 53"
+```
+
+### 2.1b tcpdump inside the plain resolver (quick live view)
+```bash
+docker exec -it dns_resolver_plain sh -lc "apk add --no-cache tcpdump >/dev/null 2>&1 || true; tcpdump -ni any port 53"
 ```
 
 ### 2.2 Capture PCAP and open in Wireshark (best for  evidence)
@@ -141,7 +151,7 @@ drill @127.0.0.1 example.test A || true
 
 ---
 
-### Test 5 — DNSSEC validation works (if enabled)
+### Test 5a — DNSSEC validation works (validating resolver)
 ```bash
 docker exec -it dns_client sh
 dig @172.32.0.20 example.test A +dnssec
@@ -154,10 +164,17 @@ docker exec -it dns_client sh -lc "apk add --no-cache bind-tools >/dev/null 2>&1
 ```
 **Expected:** `delv` reports validation success.
 
+### Test 5b — DNSSEC validation is NOT enforced (plain resolver)
+```bash
+docker exec -it dns_client sh
+dig @172.32.0.21 example.test A +dnssec
+```
+**Look for:** no `ad` flag (no validation), though `RRSIG` may still appear in the answer.
+
 #### DNSSEC chain of trust (private lab, parent + child)
 - **Authoritative #1 (parent):** serves `test.`
 - **Authoritative #2 (child):** serves `example.test.` (signed)
-- **Resolver (Unbound):** trust-anchor = `test.` and validates `www.example.test` via:
+- **Resolver (validating Unbound):** trust-anchor = `test.` and validates `www.example.test` via:
   `test (TA) -> DS(example.test) -> DNSKEY(example.test) -> RRSIG(A)`
 
 Implementation note:
@@ -175,6 +192,7 @@ Implementation note:
 From the host OS (not in Docker):
 ```bash
 dig @127.0.0.1 -p 5300 example.test A
+dig @127.0.0.1 -p 5301 example.test A
 ```
 **Expected:** works on the host.  
 **Security expectation:** it should NOT be reachable from other machines (bound to `127.0.0.1` only).
@@ -190,6 +208,7 @@ set -euo pipefail
 
 RES_TRUSTED="172.32.0.20"
 RES_UNTRUSTED="172.33.0.20"
+RES_TRUSTED_PLAIN="172.32.0.21"
 AUTH_PARENT="172.31.0.10"
 AUTH_CHILD="172.31.0.11"
 
@@ -215,6 +234,11 @@ out4="$(docker exec dns_client sh -lc "dig +time=1 +tries=1 @${AUTH_CHILD} examp
 echo "$out4" | grep -Eq "connection timed out|no servers could be reached" \
   && pass "child auth isolated from client_net" || fail "child auth isolated from client_net"
 
+echo "[5] Plain resolver should NOT set AD flag..."
+out5="$(docker exec dns_client sh -lc "dig +time=1 +tries=1 @${RES_TRUSTED_PLAIN} www.example.test A +dnssec" || true)"
+echo "$out5" | grep -Eq "flags: .* ad" \
+  && fail "plain resolver should not validate" || pass "plain resolver no AD"
+
 echo "All smoke tests completed."
 ```
 
@@ -229,16 +253,14 @@ chmod +x smoke_test_dns_lab.sh
 ## 5)  evidence checklist 
 
 ### 5.1 Topology proof
-- Output (screenshot) of:
-  - `docker network inspect ...` (shows networks + attachments + IPs)
-  - container IP listing (section 1.3)
+- Output (screenshot) of `docker network inspect ...` (shows networks + attachments + IPs)
+- Output (screenshot) of container IP listing (section 1.3)
 
 ### 5.2 Traffic proof
-- Wireshark screenshot from `dns.pcap` showing:
-  - client → resolver query
-  - resolver → authoritative query
-  - authoritative → resolver response
-  - resolver → client response
+- Wireshark screenshot from `dns.pcap` showing client → resolver query
+- Wireshark screenshot from `dns.pcap` showing resolver → authoritative query
+- Wireshark screenshot from `dns.pcap` showing authoritative → resolver response
+- Wireshark screenshot from `dns.pcap` showing resolver → client response
 
 ### 5.3 Security behavior proof (table)
 Create a table in the :
@@ -249,8 +271,10 @@ Create a table in the :
 | T2 | Untrusted blocked | `dig @172.33.0.20 ...` | REFUSED/No-RA | ... |
 | T3 | Authoritative isolated | `dig @172.31.0.10 ...` | timeout | ... |
 | T4 | Resolver→Auth OK | `drill @172.31.0.10 ...` | OK | ... |
-| T5 | DNSSEC validation | `delv ...` | validated | ... |
-| T6 | Localhost-only publish | `dig @127.0.0.1 -p 5300 ...` | OK local | ... |
+| T5a | DNSSEC validation (validating) | `delv ...` | validated | ... |
+| T5b | DNSSEC no validation (plain) | `dig @172.32.0.21 ... +dnssec` | no `ad` | ... |
+| T6a | Localhost-only publish (valid) | `dig @127.0.0.1 -p 5300 ...` | OK local | ... |
+| T6b | Localhost-only publish (plain) | `dig @127.0.0.1 -p 5301 ...` | OK local | ... |
 
 ---
 

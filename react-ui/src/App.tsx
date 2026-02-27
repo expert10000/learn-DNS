@@ -4,8 +4,11 @@ import './index.css';
 type Client = 'trusted' | 'untrusted' | 'mgmt';
 type Backend = 'client' | 'lab_api';
 
+type ResolverKind = 'valid' | 'plain';
+
 type DigRequest = {
   client: Client;
+  resolver: ResolverKind;
   name: string;
   qtype: string;
   dnssec: boolean;
@@ -86,6 +89,7 @@ type CaptureStopResponse = {
 
 const DEFAULT_REQUEST: DigRequest = {
   client: 'trusted',
+  resolver: 'valid',
   name: 'www.example.test',
   qtype: 'A',
   dnssec: true,
@@ -150,6 +154,47 @@ function formatBytes(bytes: number): string {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function parseDigRcode(output: string): string | undefined {
+  for (const line of output.split('\n')) {
+    if (!line.includes('status:')) {
+      continue;
+    }
+    const match = line.match(/status:\s*([A-Z0-9_]+)/i);
+    if (match) {
+      return match[1].toUpperCase();
+    }
+  }
+  return undefined;
+}
+
+function parseDigAd(output: string): boolean | undefined {
+  for (const line of output.split('\n')) {
+    if (!line.includes(';; flags:')) {
+      continue;
+    }
+    const match = line.match(/;; flags:\s*([^;]+)/i);
+    if (!match) {
+      continue;
+    }
+    const flags = match[1]
+      .trim()
+      .split(/\s+/)
+      .map((flag) => flag.toLowerCase());
+    return flags.includes('ad');
+  }
+  return undefined;
+}
+
+function formatStatusLabel(rcode?: string, ad?: boolean): string {
+  if (!rcode) {
+    return ad === undefined ? 'Completed' : `Completed (AD=${ad ? 'yes' : 'no'})`;
+  }
+  if (rcode === 'NOERROR') {
+    return `OK (${rcode}${ad === undefined ? '' : `, AD=${ad ? 'yes' : 'no'}`})`;
+  }
+  return `${rcode}${ad === undefined ? '' : ` (AD=${ad ? 'yes' : 'no'})`}`;
+}
+
 export default function App() {
   const [req, setReq] = useState<DigRequest>(DEFAULT_REQUEST);
   const [backend, setBackend] = useState<Backend>('client');
@@ -181,6 +226,19 @@ export default function App() {
   }
   const groupPrefix = configGroup === 'authoritative' ? 'bind/' : 'unbound/';
   const groupedFiles = configFiles.filter((f) => f.path.startsWith(groupPrefix));
+  const resolverIpByClient: Record<ResolverKind, Record<Client, string>> = {
+    valid: {
+      trusted: '172.32.0.20',
+      untrusted: '172.33.0.20',
+      mgmt: '172.30.0.20',
+    },
+    plain: {
+      trusted: '172.32.0.21',
+      untrusted: '172.33.0.21',
+      mgmt: '172.30.0.21',
+    },
+  };
+  const resolverLabel = `${req.resolver} (${resolverIpByClient[req.resolver][req.client]})`;
 
   useEffect(() => {
     if (groupedFiles.length === 0) {
@@ -195,27 +253,35 @@ export default function App() {
     setIsBusy(true);
     setStatus('Running dig...');
     try {
-      const { client, ...body } = req;
+      const { client, resolver, ...body } = req;
       if (backend === 'client') {
+        const server = resolverIpByClient[resolver][client];
         const result = await postJson<ClientDigResponse>(
           `${clientBase}/dig`,
-          body
+          { ...body, server }
         );
+        const parsedRcode = parseDigRcode(result.output);
+        const parsedAd = parseDigAd(result.output);
+        const adFlag = parsedAd ?? result.ad;
         setOutput({
           ok: result.ok,
           command: result.cmd.join(' '),
           text: result.output,
         });
-        setStatus(result.ok ? `OK (AD=${result.ad ? 'yes' : 'no'})` : 'Completed');
+        setStatus(formatStatusLabel(parsedRcode, adFlag));
       } else {
         const result = await postJson<LabDigResponse>(
           `${LAB_API_BASE}/dig`,
-          { profile: client, ...body },
+          { profile: client, resolver, ...body },
           labHeaders
         );
         const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+        const parsedRcode = parseDigRcode(text);
+        const parsedAd = parseDigAd(text);
         setOutput({ ok: result.ok, command: result.command, text });
-        setStatus(result.ok ? 'OK' : 'Completed with errors');
+        setStatus(
+          result.ok ? formatStatusLabel(parsedRcode, parsedAd) : 'Completed with errors'
+        );
       }
     } catch (err) {
       setStatus((err as Error).message);
@@ -427,7 +493,9 @@ export default function App() {
           <h1>DNS Security Lab</h1>
           <p>React UI on Win11, talking to per-client APIs and the lab API.</p>
         </div>
-        <div className="pill">API: {backend === 'client' ? clientBase : LAB_API_BASE}</div>
+        <div className="pill">
+          API: {backend === 'client' ? clientBase : LAB_API_BASE} • Resolver: {resolverLabel}
+        </div>
       </header>
 
       {backend === 'lab_api' && missingLabKey && (
@@ -463,6 +531,19 @@ export default function App() {
               <option value="trusted">trusted</option>
               <option value="untrusted">untrusted</option>
               <option value="mgmt">mgmt</option>
+            </select>
+          </label>
+
+          <label>
+            Resolver
+            <select
+              value={req.resolver}
+              onChange={(e) =>
+                setReq({ ...req, resolver: e.target.value as ResolverKind })
+              }
+            >
+              <option value="valid">validating</option>
+              <option value="plain">plain</option>
             </select>
           </label>
 

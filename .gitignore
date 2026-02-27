@@ -10,4 +10,6 @@ bind9_parent/zones/*.signed
 bind9_parent/zones/*.jnl
 bind9_parent/zones/*.jbk
 unbound/log/
+unbound/log_plain/
 anchors/test.key
+scripts/__pycache__/

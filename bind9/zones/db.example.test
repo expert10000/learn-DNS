@@ -1,12 +1,12 @@
 $TTL 300
-@   IN SOA ns1.example.test. admin.example.test. (
-        2026022601 ; serial
+@   IN SOA ns-child.test. admin.example.test. (
+        2026022702 ; serial
         1h         ; refresh
         15m        ; retry
         1w         ; expire
         5m         ; negative caching
 )
-    IN NS  ns1.example.test.
+    IN NS  ns-child.test.
 
 ns1 IN A   172.31.0.11
 www IN A   172.31.0.11

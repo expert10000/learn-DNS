@@ -59,6 +59,32 @@ services:
       - "127.0.0.1:5300:53/udp"
       - "127.0.0.1:5300:53/tcp"
 
+  resolver_plain:
+    image: mvance/unbound:1.20.0
+    container_name: dns_resolver_plain
+    restart: unless-stopped
+    depends_on:
+      - authoritative_parent
+      - authoritative_child
+    networks:
+      dns_core:
+        ipv4_address: 172.31.0.21
+      client_net:
+        ipv4_address: 172.32.0.21
+      untrusted_net:
+        ipv4_address: 172.33.0.21
+      mgmt_net:
+        ipv4_address: 172.30.0.21
+    volumes:
+      - ./unbound/unbound.plain.conf:/opt/unbound/etc/unbound/unbound.conf:ro
+      - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
+      - ./unbound/start_plain.sh:/opt/unbound/etc/unbound/start.sh:ro
+      - ./unbound/log_plain:/var/log/unbound
+    command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
+    ports:
+      - "127.0.0.1:5301:53/udp"
+      - "127.0.0.1:5301:53/tcp"
+
   client:
     build:
       context: ./client_api
@@ -203,7 +229,12 @@ services:
         while true; do
           f="$$(grep -l ' DNSKEY 257 ' /bind9_parent/keys/Ktest.+013+*.key 2>/dev/null | head -n1 || true)";
           if [ -n "$$f" ]; then
-            cp "$$f" /anchors/test.key;
+            grep -m1 ' DNSKEY 257 ' "$$f" | awk '{
+              name=$$1; type=$$4;
+              flags=$$5; proto=$$6; alg=$$7;
+              key=""; for (i=8; i<=NF; i++) key=key $$i;
+              print name, type, flags, proto, alg, key
+            }' > /anchors/test.key;
             echo "Wrote /anchors/test.key";
             break;
           fi;

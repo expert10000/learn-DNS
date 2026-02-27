@@ -31,7 +31,13 @@ curl -s http://localhost:8000/health
 curl -s http://localhost:8000/dig \
   -H "Content-Type: application/json" \
   -H "X-API-Key: change_me_long_random" \
-  -d '{"profile":"trusted","name":"example.org","qtype":"A"}'
+  -d '{"profile":"trusted","resolver":"valid","name":"example.org","qtype":"A"}'
+
+# Plain resolver (no DNSSEC validation)
+curl -s http://localhost:8000/dig \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: change_me_long_random" \
+  -d '{"profile":"trusted","resolver":"plain","name":"example.org","qtype":"A"}'
 ```
 
 ## Security notes

@@ -39,7 +39,7 @@ def compute_ds(dnskey_text: str, owner: str) -> tuple[int, int, str]:
     wire = b""
     for lab in labels:
         wire += bytes([len(lab)]) + lab.lower().encode("ascii")
-    wire += b"\\x00"
+    wire += b"\x00"
     digest = hashlib.sha256(wire + rdata).hexdigest().upper()
 
     return keytag, alg, digest

@@ -32,9 +32,16 @@ app.add_middleware(
 
 # Choose resolver IP by "segment" so Unbound ACLs behave like real clients
 RESOLVER_BY_PROFILE = {
-    "trusted": "172.32.0.20",    # client_net
-    "untrusted": "172.33.0.20",  # untrusted_net
-    "mgmt": "172.30.0.20",       # mgmt_net
+    "valid": {
+        "trusted": "172.32.0.20",    # client_net
+        "untrusted": "172.33.0.20",  # untrusted_net
+        "mgmt": "172.30.0.20",       # mgmt_net
+    },
+    "plain": {
+        "trusted": "172.32.0.21",    # client_net
+        "untrusted": "172.33.0.21",  # untrusted_net
+        "mgmt": "172.30.0.21",       # mgmt_net
+    },
 }
 
 NAME_RE = re.compile(
@@ -63,6 +70,7 @@ CAPTURE_FILTERS = {
 
 class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
     name: str = Field(..., examples=["example.org"])
     qtype: Literal["A", "AAAA", "NS", "MX", "TXT", "SOA", "CNAME", "DNSKEY", "DS"] = "A"
     dnssec: bool = False
@@ -222,7 +230,7 @@ def dig(req: DigRequest, x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
 
     name = validate_name(req.name)
-    resolver_ip = RESOLVER_BY_PROFILE[req.profile]
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
 
     # safe allow-list: only runs dig with controlled arguments
     args = ["dig", f"@{resolver_ip}", name, req.qtype, "+time=1", "+tries=1"]
