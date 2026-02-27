@@ -69,6 +69,24 @@ CAPTURE_FILTERS = {
     "all": "",
 }
 
+AUTH_CHILD_IP = os.getenv("AUTH_CHILD_IP", "172.31.0.11")
+RESOLVER_CORE_IP = os.getenv("RESOLVER_CORE_IP", "172.31.0.20")
+
+SIGNING_SWITCHER_CONTAINER = os.getenv(
+    "SIGNING_SWITCHER_CONTAINER", "dns_signing_switcher"
+)
+SIGNING_PARENT_CONTAINER = os.getenv(
+    "SIGNING_PARENT_CONTAINER", "dns_authoritative_parent"
+)
+SIGNING_CHILD_CONTAINER = os.getenv(
+    "SIGNING_CHILD_CONTAINER", "dns_authoritative_child"
+)
+RESOLVER_CONTAINER = os.getenv("SIGNING_RESOLVER_CONTAINER", "dns_resolver")
+DS_RECOMPUTE_CONTAINER = os.getenv("DS_RECOMPUTE_CONTAINER", "dns_ds_recompute")
+ANCHOR_EXPORT_CONTAINER = os.getenv(
+    "ANCHOR_EXPORT_CONTAINER", "dns_anchor_export"
+)
+
 class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
     resolver: Literal["valid", "plain"] = "valid"
@@ -147,6 +165,42 @@ class CaptureListResponse(BaseModel):
     files: list[CaptureFileInfo]
     running: dict[str, bool]
 
+class CaptureSummaryResponse(BaseModel):
+    ok: bool
+    file: str
+    target: Literal["resolver", "authoritative"]
+    total_packets: int
+    upstream_queries: int
+    command_total: str
+    command_upstream: str
+    stdout_total: str
+    stdout_upstream: str
+    stderr_total: str
+    stderr_upstream: str
+
+class SigningSwitchRequest(BaseModel):
+    mode: Literal["nsec", "nsec3"]
+
+class SigningStep(BaseModel):
+    step: str
+    ok: bool
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
+class SigningSwitchResponse(BaseModel):
+    ok: bool
+    mode: Literal["nsec", "nsec3"]
+    steps: list[SigningStep]
+
+class ResolverRestartResponse(BaseModel):
+    ok: bool
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
 def require_key(x_api_key: Optional[str]):
     if not API_KEY:
         raise HTTPException(status_code=500, detail="Server missing LAB_API_KEY env")
@@ -206,6 +260,19 @@ def resolve_config_path(rel_path: str) -> Path:
 def docker_exec(container: str, sh_cmd: str, timeout_s: int = 8) -> CmdResponse:
     return run_cmd(["docker", "exec", container, "sh", "-lc", sh_cmd], timeout_s)
 
+def docker_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
+    return run_cmd(["docker", *args], timeout_s)
+
+def ensure_running(container: str) -> CmdResponse:
+    inspect = docker_cmd(
+        ["inspect", "-f", "{{.State.Running}}", container], timeout_s=6
+    )
+    if inspect.exit_code != 0:
+        return inspect
+    if inspect.stdout.strip().lower() == "true":
+        return inspect
+    return docker_cmd(["start", container], timeout_s=10)
+
 def capture_pid_file(target: str) -> str:
     return f"/tmp/capture_{target}.pid"
 
@@ -234,6 +301,19 @@ def capture_running(target: Literal["resolver", "authoritative"]) -> bool:
         docker_exec(container, f"rm -f {pid_path}")
         return False
     return "RUNNING" in result.stdout
+
+def capture_target_from_file(name: str) -> Literal["resolver", "authoritative"]:
+    if name.startswith("resolver-"):
+        return "resolver"
+    if name.startswith("authoritative-"):
+        return "authoritative"
+    raise HTTPException(status_code=400, detail="Unknown capture file target")
+
+def parse_count(value: str) -> int:
+    try:
+        return int(value.strip())
+    except ValueError:
+        return -1
 
 def ensure_capture_dir():
     if not CAPTURE_DIR.exists():
@@ -324,7 +404,8 @@ def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(de
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"{req.target}-{ts}.pcap"
     filter_expr = CAPTURE_FILTERS[req.filter]
-    base_cmd = f"tcpdump -i any -s 0 -U -w /captures/{filename}"
+    iface = "eth0" if req.target == "authoritative" else "any"
+    base_cmd = f"tcpdump -i {iface} -s 0 -U -w /captures/{filename}"
     if filter_expr:
         base_cmd = f"{base_cmd} {filter_expr}"
 
@@ -361,7 +442,7 @@ def capture_stop(req: CaptureStopRequest, x_api_key: Optional[str] = Header(defa
         f"pid=$(cat {pid_path}); "
         f"file=$(cat {file_path} 2>/dev/null || true); "
         f"kill -2 $pid >/dev/null 2>&1 || true; "
-        "sleep 1; "
+        "sleep 2; "
         f"rm -f {pid_path}; "
         "echo $file"
     )
@@ -431,3 +512,141 @@ def capture_download(
         filename=file,
         media_type="application/vnd.tcpdump.pcap",
     )
+
+@app.post("/resolver/restart", response_model=ResolverRestartResponse)
+def resolver_restart(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    res = docker_cmd(["restart", RESOLVER_CONTAINER], timeout_s=20)
+    return ResolverRestartResponse(
+        ok=res.ok,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.get("/capture/summary", response_model=CaptureSummaryResponse)
+def capture_summary(
+    file: str,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+    ensure_capture_dir()
+
+    if not file or "/" in file or ".." in file:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+
+    full = (CAPTURE_DIR / file).resolve()
+    if not full.exists() or not full.is_file():
+        raise HTTPException(status_code=404, detail="Capture not found")
+    if CAPTURE_DIR not in full.parents:
+        raise HTTPException(status_code=403, detail="Path not allowed")
+
+    target = capture_target_from_file(file)
+    container = CAPTURE_TARGETS[target]
+
+    total_cmd = f"tcpdump -nn -r /captures/{file} port 53 2>/dev/null | wc -l"
+    total = docker_exec(container, total_cmd, timeout_s=15)
+
+    if target == "authoritative":
+        upstream_cmd = (
+            "tcpdump -nn -r /captures/{file} "
+            "src {resolver} and dst {auth} and port 53 2>/dev/null | wc -l"
+        ).format(file=file, resolver=RESOLVER_CORE_IP, auth=AUTH_CHILD_IP)
+    else:
+        upstream_cmd = "tcpdump -nn -r /captures/{file} port 53 2>/dev/null | wc -l".format(
+            file=file
+        )
+    upstream = docker_exec(container, upstream_cmd, timeout_s=15)
+
+    return CaptureSummaryResponse(
+        ok=total.ok and upstream.ok,
+        file=file,
+        target=target,
+        total_packets=parse_count(total.stdout),
+        upstream_queries=parse_count(upstream.stdout),
+        command_total=total.command,
+        command_upstream=upstream.command,
+        stdout_total=total.stdout,
+        stdout_upstream=upstream.stdout,
+        stderr_total=total.stderr,
+        stderr_upstream=upstream.stderr,
+    )
+
+@app.post("/signing/switch", response_model=SigningSwitchResponse)
+def signing_switch(
+    req: SigningSwitchRequest,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+
+    steps: list[SigningStep] = []
+
+    def record(step: str, res: CmdResponse) -> bool:
+        steps.append(
+            SigningStep(
+                step=step,
+                ok=res.ok,
+                command=res.command,
+                exit_code=res.exit_code,
+                stdout=res.stdout,
+                stderr=res.stderr,
+            )
+        )
+        return res.ok
+
+    ok = True
+
+    ok = ok and record(
+        "ensure switcher running",
+        ensure_running(SIGNING_SWITCHER_CONTAINER),
+    )
+
+    if ok:
+        ok = ok and record(
+            f"apply mode {req.mode}",
+            docker_exec(
+                SIGNING_SWITCHER_CONTAINER,
+                f"sh /switcher/switch_signing.sh {req.mode}",
+                timeout_s=120,
+            ),
+        )
+
+    if ok:
+        ok = ok and record(
+            "restart authoritative",
+            docker_cmd(
+                ["restart", SIGNING_PARENT_CONTAINER, SIGNING_CHILD_CONTAINER],
+                timeout_s=20,
+            ),
+        )
+
+    if ok and req.mode == "nsec3":
+        ok = ok and record(
+            "run ds_recompute",
+            docker_cmd(["start", DS_RECOMPUTE_CONTAINER], timeout_s=15),
+        )
+        if ok:
+            ok = ok and record(
+                "wait ds_recompute",
+                docker_cmd(["wait", DS_RECOMPUTE_CONTAINER], timeout_s=120),
+            )
+
+        if ok:
+            ok = ok and record(
+                "run anchor_export",
+                docker_cmd(["start", ANCHOR_EXPORT_CONTAINER], timeout_s=15),
+            )
+        if ok:
+            ok = ok and record(
+                "wait anchor_export",
+                docker_cmd(["wait", ANCHOR_EXPORT_CONTAINER], timeout_s=120),
+            )
+
+        if ok:
+            ok = ok and record(
+                "restart resolver",
+                docker_cmd(["restart", RESOLVER_CONTAINER], timeout_s=20),
+            )
+
+    return SigningSwitchResponse(ok=ok, mode=req.mode, steps=steps)

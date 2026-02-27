@@ -176,7 +176,8 @@ dig @172.32.0.21 example.test A +dnssec
 docker exec -it dns_client sh
 dig @172.31.0.11 nope1.example.test A +dnssec +multi
 ```
-**Expected:** `status: NXDOMAIN` and `NSEC3` / `NSEC3PARAM` records in the authority section.
+**Expected (offline NSEC3 mode):** `status: NXDOMAIN` and `NSEC3` / `NSEC3PARAM` records in the authority section.
+**Expected (inline NSEC mode):** `status: NXDOMAIN` with `NSEC` records instead of `NSEC3`.
 
 ### Test 5d — Aggressive NSEC (validating resolver)
 ```bash
@@ -184,7 +185,7 @@ docker exec -it dns_client sh
 dig @172.32.0.20 nope1.example.test A +dnssec
 dig @172.32.0.20 nope2.example.test A +dnssec
 ```
-**Expected:** the second NXDOMAIN can be synthesized from cached NSEC3 proofs.
+**Expected:** the second NXDOMAIN can be synthesized from cached proofs (NSEC or NSEC3).
 For evidence, watch upstream queries with tcpdump (section 2) or check authoritative logs.
 
 #### DNSSEC chain of trust (private lab, parent + child)

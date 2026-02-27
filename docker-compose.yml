@@ -164,6 +164,8 @@ services:
       - LAB_API_KEY=change_me_long_random
       - CAPTURE_RESOLVER_CONTAINER=dns_capture_resolver
       - CAPTURE_AUTHORITATIVE_CONTAINER=dns_capture_authoritative
+      - AUTH_CHILD_IP=172.31.0.11
+      - RESOLVER_CORE_IP=172.31.0.20
     networks:
       client_net:
         ipv4_address: 172.32.0.90
@@ -249,8 +251,16 @@ services:
           fi;
           if [ -n "$$best_state" ]; then
             f="$${best_state%.state}.key";
-            if [ -f "$$f" ]; then
-              grep -m1 ' DNSKEY 257 ' "$$f" | awk '{
+          else
+            f="$$(ls -t /bind9_parent/keys/Ktest.+013+*.key 2>/dev/null | head -n1 || true)";
+            if [ -n "$$f" ] && ! grep -q ' DNSKEY 257 ' "$$f"; then
+              f="$$(grep -l ' DNSKEY 257 ' /bind9_parent/keys/Ktest.+013+*.key 2>/dev/null | head -n1 || true)";
+            fi;
+          fi;
+          if [ -n "$$f" ] && [ -f "$$f" ]; then
+            line="$$(grep -m1 ' DNSKEY 257 ' "$$f" || true)";
+            if [ -n "$$line" ]; then
+              echo "$$line" | awk '{
                 name=$$1; type=$$4;
                 flags=$$5; proto=$$6; alg=$$7;
                 key=""; for (i=8; i<=NF; i++) key=key $$i;
@@ -287,6 +297,30 @@ services:
     volumes:
       - ./:/work
       - /var/run/docker.sock:/var/run/docker.sock
+
+  signing_switcher:
+    image: internetsystemsconsortium/bind9:9.18
+    container_name: dns_signing_switcher
+    restart: unless-stopped
+    entrypoint: ["sh", "-lc"]
+    command: "sleep infinity"
+    volumes:
+      - ./scripts:/switcher:ro
+      - ./bind9:/bind9
+      - ./bind9_parent:/bind9_parent
+
+  signer:
+    image: internetsystemsconsortium/bind9:9.18
+    container_name: dns_signer
+    working_dir: /tmp
+    entrypoint: ["sh", "-lc"]
+    command: "/signer/sign_zones.sh"
+    volumes:
+      - ./scripts:/signer:ro
+      - ./bind9_parent/zones:/bind9_parent/zones
+      - ./bind9_parent/keys:/bind9_parent/keys
+      - ./bind9/zones:/bind9/zones
+      - ./bind9/keys:/bind9/keys
 
   react_ui:
     build:

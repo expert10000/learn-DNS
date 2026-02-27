@@ -13,3 +13,4 @@ unbound/log/
 unbound/log_plain/
 anchors/test.key
 scripts/__pycache__/
+captures/*.pcap

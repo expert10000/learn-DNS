@@ -177,22 +177,60 @@ more frequent checks, shorten the schedule (e.g., every 6 hours).
 
 Run Query (NSEC3 Proof / NXDOMAIN)
 
+Inline NSEC mode (default):
 status: NXDOMAIN
 flags: qr rd ra ad
 AUTHORITY: SOA + RRSIG + NSEC + RRSIG
-So it’s returning NSEC, not NSEC3. That means the zone is currently signed with NSEC (not NSEC3), even though the UI indicator says NSEC3.
+
+Offline NSEC3 mode:
+status: NXDOMAIN
+flags: qr rd ra ad
+AUTHORITY: SOA + RRSIG + NSEC3 + RRSIG + NSEC3PARAM
 
 Run Demo (Aggressive NSEC)
 
-Query 1: nope1.example.test → NXDOMAIN + NSEC
-Query 2: nope2.example.test → NXDOMAIN + NSEC (from cache)
+Query 1: nope1.example.test → NXDOMAIN + (NSEC or NSEC3)
+Query 2: nope2.example.test → NXDOMAIN + (from cache)
 This demo’s goal is to show that the second NXDOMAIN can be synthesized from cached denial records, reducing upstream authoritative queries. To prove that, you’d normally watch tcpdump or authoritative logs and see fewer upstream queries on the second request.
 
 What the buttons do in the UI
 Run Query: runs a single NXDOMAIN query with DNSSEC enabled against the validating resolver (nope1.example.test).
 Run Demo: runs two NXDOMAIN queries in a row (nope1, then nope2). With aggressive NSEC enabled, the second should be answered from cached denial data.
-Important: NSEC3 is not active yet
-Even though the zone file has NSEC3PARAM, BIND is still signing with NSEC (confirmed by live response).
-So the UI indicator is optimistic right now.
+The UI indicator now checks the signed zone file when available, so it reflects the actual signing mode.
 
-If you want real NSEC3, we need to switch to an offline signing flow using dnssec-signzone -3 (or find a working inline NSEC3 config for this BIND build). I can implement that for both test. and example.test. and update the UI to detect actual NSEC3 in the signed zone.
+Switching between NSEC and NSEC3
+
+Inline NSEC (default):
+```powershell
+.\scripts\set_signing_mode.ps1 -Mode nsec
+docker compose restart authoritative_parent authoritative_child
+```
+
+Offline NSEC3:
+```powershell
+.\scripts\set_signing_mode.ps1 -Mode nsec3 -RunSigner
+docker compose restart authoritative_parent authoritative_child
+docker compose run --rm ds_recompute
+docker compose run --rm anchor_export
+docker compose restart resolver
+```
+
+Linux/macOS:
+```bash
+./scripts/set_signing_mode.sh nsec
+./scripts/set_signing_mode.sh nsec3 --run-signer
+```
+
+UI switch (online):
+- Use the "Switch to NSEC3 (offline)" and "Switch to NSEC (inline)" buttons.
+- The UI triggers the Lab API to apply the config, sign zones (NSEC3), and restart components.
+- Refresh indicators after switching to confirm the active mode.
+
+Aggressive NSEC proof (UI):
+- Use "Run Demo + Proof" to capture authoritative traffic during two NXDOMAIN queries.
+- The UI shows how many upstream queries hit the authoritative server (should be 1).
+- Optionally restart the resolver first to clear cache for a cleaner proof.
+
+Notes:
+- Offline NSEC3 uses `dnssec-signzone -3` via `docker compose run --rm signer`.
+- `anchor_export` now supports both BIND-managed keys (`.state`) and offline key files (`.key`).

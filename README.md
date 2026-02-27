@@ -70,13 +70,53 @@ From the untrusted client (should be refused):
 From the host (mapped to localhost port 5300):
 1. `dig @127.0.0.1 -p 5300 example.test +dnssec`
 
-## NSEC3 + Aggressive NSEC
-- `test.` and `example.test` are signed with **NSEC3** via `NSEC3PARAM` records
-  in the zone files (`bind9_parent/zones/db.test`, `bind9/zones/db.example.test`).
+## NSEC vs NSEC3 + Aggressive NSEC
+- Default mode is **inline NSEC** (BIND auto-signing).
+- Optional **offline NSEC3** signing is supported via `dnssec-signzone -3`.
 - The validating resolver (`resolver`) uses **aggressive NSEC** to synthesize
-  NXDOMAIN answers from cached NSEC3 proofs.
+  NXDOMAIN answers from cached proofs (works with NSEC or NSEC3, but the lab
+  demos are written for NSEC3).
 
-### Verify NSEC3 on the child zone
+### Switch to offline NSEC3 (Windows PowerShell)
+```powershell
+.\scripts\set_signing_mode.ps1 -Mode nsec3 -RunSigner
+docker compose restart authoritative_parent authoritative_child
+docker compose run --rm ds_recompute
+docker compose run --rm anchor_export
+docker compose restart resolver
+```
+
+### Switch to offline NSEC3 (Linux/macOS)
+```bash
+./scripts/set_signing_mode.sh nsec3 --run-signer
+docker compose restart authoritative_parent authoritative_child
+docker compose run --rm ds_recompute
+docker compose run --rm anchor_export
+docker compose restart resolver
+```
+
+### Switch back to inline NSEC
+```powershell
+.\scripts\set_signing_mode.ps1 -Mode nsec
+docker compose restart authoritative_parent authoritative_child
+```
+
+### Switch back to inline NSEC (Linux/macOS)
+```bash
+./scripts/set_signing_mode.sh nsec
+docker compose restart authoritative_parent authoritative_child
+```
+
+### UI switcher
+The React UI includes buttons to switch modes online (Lab API key required).
+After switching, verify the indicator and run the NSEC3 proof query.
+
+### Aggressive NSEC proof (UI)
+Use "Run Demo + Proof" to capture authoritative traffic while the demo runs.
+The UI reports how many upstream queries reached the authoritative server.
+Enable "Restart resolver (clear cache)" for a clean proof.
+
+### Verify NSEC3 on the child zone (offline NSEC3 mode)
 ```bash
 dig @172.31.0.11 nope1.example.test A +dnssec +multi
 ```
@@ -87,7 +127,7 @@ dig @172.31.0.11 nope1.example.test A +dnssec +multi
 dig @172.32.0.20 nope1.example.test A +dnssec
 dig @172.32.0.20 nope2.example.test A +dnssec
 ```
-**Expected:** the second NXDOMAIN can be answered from cached NSEC3, which reduces
+**Expected:** the second NXDOMAIN can be answered from cached proofs, which reduces
 authoritative queries (confirm via tcpdump or logs if needed).
 
 ## Files

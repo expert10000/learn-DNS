@@ -99,6 +99,39 @@ type CaptureStopResponse = {
   file?: string;
 };
 
+type CaptureSummaryResponse = {
+  ok: boolean;
+  file: string;
+  target: CaptureTarget;
+  total_packets: number;
+  upstream_queries: number;
+  command_total: string;
+  command_upstream: string;
+  stdout_total: string;
+  stdout_upstream: string;
+  stderr_total: string;
+  stderr_upstream: string;
+};
+
+type SigningSwitchRequest = {
+  mode: 'nsec' | 'nsec3';
+};
+
+type SigningStep = {
+  step: string;
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
+type SigningSwitchResponse = {
+  ok: boolean;
+  mode: 'nsec' | 'nsec3';
+  steps: SigningStep[];
+};
+
 const DEFAULT_REQUEST: DigRequest = {
   client: 'trusted',
   resolver: 'valid',
@@ -221,19 +254,29 @@ function indicatorClass(value?: boolean): string {
   return value ? 'enabled' : 'disabled';
 }
 
-function parseNsec3FromZone(content: string) {
-  const hasRecord = content
+function parseNsec3FromZone(content: string, sourceLabel: string) {
+  const lines = content
     .split('\n')
-    .some(
-      (line) =>
-        line.trim().length > 0 &&
-        !line.trim().startsWith(';') &&
-        /\bNSEC3PARAM\b/i.test(line)
-    );
-  return {
-    enabled: hasRecord,
-    detail: `NSEC3PARAM record: ${hasRecord ? 'present' : 'missing'}`,
-  };
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !line.startsWith(';'));
+
+  const hasNsec3 = lines.some((line) => /\bNSEC3\b/i.test(line));
+  const hasNsec = lines.some((line) => /\bNSEC\b/i.test(line));
+  const hasParam = lines.some((line) => /\bNSEC3PARAM\b/i.test(line));
+
+  if (hasNsec3) {
+    return { enabled: true, detail: `NSEC3 records detected (${sourceLabel})` };
+  }
+  if (hasNsec) {
+    return { enabled: false, detail: `NSEC records detected (${sourceLabel})` };
+  }
+  if (hasParam) {
+    return {
+      enabled: false,
+      detail: `NSEC3PARAM present but no NSEC3 records (${sourceLabel})`,
+    };
+  }
+  return { enabled: false, detail: `No NSEC/NSEC3 records found (${sourceLabel})` };
 }
 
 function parseAggressiveNsec(content: string) {
@@ -243,6 +286,65 @@ function parseAggressiveNsec(content: string) {
   }
   const enabled = match[1].toLowerCase() === 'yes';
   return { enabled, detail: `aggressive-nsec: ${match[1].toLowerCase()}` };
+}
+
+function parseNsecInterval(output: string) {
+  for (const line of output.split('\n')) {
+    const match = line.match(/^(\S+)\s+\d+\s+IN\s+NSEC\s+(\S+)/i);
+    if (match) {
+      return { owner: match[1], next: match[2] };
+    }
+  }
+  return null;
+}
+
+function normalizeName(name: string) {
+  return name.endsWith('.') ? name.slice(0, -1) : name;
+}
+
+function stripZone(name: string, zone: string) {
+  const clean = normalizeName(name).toLowerCase();
+  const zoneClean = normalizeName(zone).toLowerCase();
+  if (clean === zoneClean) {
+    return '';
+  }
+  const suffix = `.${zoneClean}`;
+  if (clean.endsWith(suffix)) {
+    return clean.slice(0, -suffix.length);
+  }
+  return clean;
+}
+
+function cmpLabel(a: string, b: string) {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+function isBetween(owner: string, next: string, candidate: string) {
+  const cmpOwnerNext = cmpLabel(owner, next);
+  const cmpOwnerCand = cmpLabel(owner, candidate);
+  const cmpCandNext = cmpLabel(candidate, next);
+  if (cmpOwnerNext < 0) {
+    return cmpOwnerCand < 0 && cmpCandNext < 0;
+  }
+  return cmpOwnerCand > 0 || cmpCandNext < 0;
+}
+
+function pickLabelBetween(owner: string, next: string) {
+  const candidates = ['a', 'b', 'c', 'm', 'n', 't', 'x', 'y', 'z', 'zz', 'zzz'];
+  for (const cand of candidates) {
+    if (isBetween(owner, next, cand)) {
+      return cand;
+    }
+  }
+  for (let i = 0; i < 20; i += 1) {
+    const rand = Math.random().toString(36).slice(2, 8);
+    const cand = `p-${rand}`;
+    if (isBetween(owner, next, cand)) {
+      return cand;
+    }
+  }
+  return null;
 }
 
 export default function App() {
@@ -267,6 +369,14 @@ export default function App() {
     resolver: false,
     authoritative: false,
   });
+  const [signingBusy, setSigningBusy] = useState(false);
+  const [signingStatus, setSigningStatus] = useState('');
+  const [signingOutput, setSigningOutput] = useState('');
+  const [proofBusy, setProofBusy] = useState(false);
+  const [proofStatus, setProofStatus] = useState('');
+  const [proofOutput, setProofOutput] = useState('');
+  const [proofCaptureFile, setProofCaptureFile] = useState('');
+  const [proofColdCache, setProofColdCache] = useState(true);
   const [indicators, setIndicators] = useState<IndicatorState>({
     loading: false,
     message: 'Not loaded.',
@@ -370,6 +480,24 @@ export default function App() {
     }
   };
 
+  const executeLabDig = async (request: DigRequest) => {
+    const { client, resolver, ...body } = request;
+    const result = await postJson<LabDigResponse>(
+      `${LAB_API_BASE}/dig`,
+      { profile: client, resolver, ...body },
+      labHeaders
+    );
+    const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+    const parsedRcode = parseDigRcode(text);
+    const parsedAd = parseDigAd(text);
+    return {
+      ok: result.ok,
+      output: { ok: result.ok, command: result.command, text },
+      rcode: parsedRcode,
+      ad: parsedAd,
+    };
+  };
+
   const applyNsec3ProofPreset = () => {
     setReq({
       ...req,
@@ -442,6 +570,119 @@ export default function App() {
       setOutput(null);
     } finally {
       setIsBusy(false);
+    }
+  };
+
+  const runAggressiveNsecProof = async () => {
+    if (missingLabKey) {
+      setProofStatus('Missing Lab API key.');
+      return;
+    }
+
+    const zone = 'example.test';
+    const base: DigRequest = {
+      ...req,
+      client: 'trusted',
+      resolver: 'valid',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    };
+    const firstReq: DigRequest = {
+      ...base,
+      name: `nope1-${Math.random().toString(36).slice(2, 7)}.${zone}`,
+    };
+    let secondReq: DigRequest = {
+      ...base,
+      name: `nope2-${Math.random().toString(36).slice(2, 7)}.${zone}`,
+    };
+
+    setProofBusy(true);
+    setProofStatus('Preparing proof...');
+    setProofOutput('');
+    setProofCaptureFile('');
+
+    try {
+      if (proofColdCache) {
+        setProofStatus('Restarting resolver to clear cache...');
+        await postJson<LabDigResponse>(
+          `${LAB_API_BASE}/resolver/restart`,
+          {},
+          labHeaders
+        );
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+      }
+
+      setProofStatus('Starting authoritative capture...');
+      const start = await postJson<CaptureStartResponse>(
+        `${LAB_API_BASE}/capture/start`,
+        { target: 'authoritative', filter: 'dns' },
+        labHeaders
+      );
+      setProofCaptureFile(start.file);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      setProofStatus('Running aggressive NSEC demo (two NXDOMAIN queries)...');
+      const first = await executeLabDig(firstReq);
+      const interval = parseNsecInterval(first.output.text);
+      if (interval) {
+        const ownerLabel = stripZone(interval.owner, zone);
+        const nextLabel = stripZone(interval.next, zone);
+        const picked = pickLabelBetween(ownerLabel, nextLabel);
+        if (picked) {
+          secondReq = { ...base, name: `${picked}.${zone}` };
+        }
+      }
+      const second = await executeLabDig(secondReq);
+
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      setProofStatus('Stopping capture...');
+      const stopped = await postJson<CaptureStopResponse>(
+        `${LAB_API_BASE}/capture/stop`,
+        { target: 'authoritative' },
+        labHeaders
+      );
+
+      const file = stopped.file || start.file;
+      setProofCaptureFile(file || '');
+
+      let summaryText = 'No capture summary.';
+      if (file) {
+        const summary = await getJson<CaptureSummaryResponse>(
+          `${LAB_API_BASE}/capture/summary?file=${encodeURIComponent(file)}`,
+          labHeaders
+        );
+        summaryText = [
+          '# Capture summary',
+          `file: ${summary.file}`,
+          `total DNS packets: ${summary.total_packets}`,
+          `upstream queries (resolver -> authoritative): ${summary.upstream_queries}`,
+        ].join('\n');
+      }
+
+      const combinedText = [
+        `# Query 1: ${firstReq.name}`,
+        first.output.command,
+        '',
+        first.output.text,
+        '',
+        `# Query 2: ${secondReq.name}`,
+        second.output.command,
+        '',
+        second.output.text,
+        '',
+        summaryText,
+      ].join('\n');
+
+      setProofOutput(combinedText);
+      setProofStatus('Aggressive NSEC proof completed.');
+    } catch (err) {
+      setProofStatus((err as Error).message);
+      setProofOutput('');
+    } finally {
+      setProofBusy(false);
     }
   };
 
@@ -586,15 +827,36 @@ export default function App() {
     let childDetail = '';
     let parentDetail = '';
     let aggressiveDetail = '';
+    const isNotFound = (err: unknown) =>
+      (err as Error).message.toLowerCase().includes('http 404');
+    const loadZoneIndicator = async (
+      signedPath: string,
+      unsignedPath: string
+    ) => {
+      try {
+        const signed = await getJson<ConfigFileResponse>(
+          `${LAB_API_BASE}/config/file?path=${encodeURIComponent(signedPath)}`,
+          labHeaders
+        );
+        return parseNsec3FromZone(signed.content, signed.path);
+      } catch (err) {
+        if (!isNotFound(err)) {
+          throw err;
+        }
+      }
 
-    try {
-      const child = await getJson<ConfigFileResponse>(
-        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
-          'bind/zones/db.example.test'
-        )}`,
+      const unsigned = await getJson<ConfigFileResponse>(
+        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(unsignedPath)}`,
         labHeaders
       );
-      const parsed = parseNsec3FromZone(child.content);
+      return parseNsec3FromZone(unsigned.content, unsigned.path);
+    };
+
+    try {
+      const parsed = await loadZoneIndicator(
+        'bind/zones/db.example.test.signed',
+        'bind/zones/db.example.test'
+      );
       childEnabled = parsed.enabled;
       childDetail = parsed.detail;
     } catch (err) {
@@ -603,13 +865,10 @@ export default function App() {
     }
 
     try {
-      const parent = await getJson<ConfigFileResponse>(
-        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
-          'bind_parent/zones/db.test'
-        )}`,
-        labHeaders
+      const parsed = await loadZoneIndicator(
+        'bind_parent/zones/db.test.signed',
+        'bind_parent/zones/db.test'
       );
-      const parsed = parseNsec3FromZone(parent.content);
       parentEnabled = parsed.enabled;
       parentDetail = parsed.detail;
     } catch (err) {
@@ -691,6 +950,42 @@ export default function App() {
       setCaptureStatus((err as Error).message);
     } finally {
       setIsBusy(false);
+    }
+  };
+
+  const switchSigningMode = async (mode: 'nsec' | 'nsec3') => {
+    if (missingLabKey) {
+      setSigningStatus('Missing Lab API key.');
+      return;
+    }
+    setSigningBusy(true);
+    setSigningStatus(`Switching to ${mode.toUpperCase()}...`);
+    setSigningOutput('');
+    try {
+      const result = await postJson<SigningSwitchResponse>(
+        `${LAB_API_BASE}/signing/switch`,
+        { mode } satisfies SigningSwitchRequest,
+        labHeaders
+      );
+      const combined = result.steps
+        .map((step) => {
+          const stdout = step.stdout?.trim();
+          const stderr = step.stderr?.trim();
+          const details = [stdout, stderr].filter(Boolean).join('\n');
+          return [`# ${step.step}`, step.command, details].filter(Boolean).join('\n');
+        })
+        .join('\n\n');
+      setSigningOutput(combined || 'No output.');
+      setSigningStatus(
+        result.ok
+          ? `Switched to ${mode.toUpperCase()}`
+          : `Switch failed (mode ${mode.toUpperCase()})`
+      );
+      await loadIndicators();
+    } catch (err) {
+      setSigningStatus((err as Error).message);
+    } finally {
+      setSigningBusy(false);
     }
   };
 
@@ -881,9 +1176,9 @@ export default function App() {
         <div className="card-title">NSEC3 / Aggressive NSEC</div>
         <div className="hint">
           <div>
-            <strong>NSEC3 signing:</strong> enabled on <code>test.</code> and{' '}
-            <code>example.test</code> via <code>NSEC3PARAM</code> records in the
-            zone files.
+            <strong>NSEC3 signing:</strong> detected from signed zone files when
+            available (falls back to the unsigned zone file if no signed file is
+            present).
           </div>
           <div>
             <strong>Aggressive NSEC:</strong> enabled on the validating resolver
@@ -914,10 +1209,29 @@ export default function App() {
           </div>
         </div>
         <div className="actions">
+          <button
+            onClick={() => switchSigningMode('nsec3')}
+            disabled={isBusy || signingBusy || missingLabKey}
+          >
+            Switch to NSEC3 (offline)
+          </button>
+          <button
+            onClick={() => switchSigningMode('nsec')}
+            disabled={isBusy || signingBusy || missingLabKey}
+          >
+            Switch to NSEC (inline)
+          </button>
           <button onClick={loadIndicators} disabled={isBusy || missingLabKey}>
             Refresh Indicators
           </button>
         </div>
+        <div className="status">
+          {signingStatus ||
+            'Use the switch buttons to change between inline NSEC and offline NSEC3.'}
+        </div>
+        <pre className="output">
+          {signingOutput || 'No switch output yet.'}
+        </pre>
         <div className="preset-grid">
           <div className="preset">
             <div className="preset-title">NSEC3 Proof (NXDOMAIN)</div>
@@ -934,19 +1248,46 @@ export default function App() {
             </div>
           </div>
           <div className="preset">
-            <div className="preset-title">Aggressive NSEC Demo</div>
-            <div className="preset-desc">
-              Runs two NXDOMAIN queries; the second should be synthesized from cached
-              NSEC3.
-            </div>
-            <div className="actions">
-              <button onClick={runAggressiveNsecDemo} disabled={isBusy}>
-                Run Demo
-              </button>
-            </div>
+          <div className="preset-title">Aggressive NSEC Demo</div>
+          <div className="preset-desc">
+            Runs two NXDOMAIN queries; the second should be synthesized from cached
+            denial proofs.
           </div>
+          <div className="actions">
+            <button onClick={runAggressiveNsecDemo} disabled={isBusy}>
+              Run Demo
+            </button>
+            <button
+              onClick={runAggressiveNsecProof}
+              disabled={isBusy || proofBusy || missingLabKey}
+            >
+              Run Demo + Proof
+            </button>
+            <button
+              onClick={() => proofCaptureFile && downloadCapture(proofCaptureFile)}
+              disabled={
+                isBusy || proofBusy || missingLabKey || !proofCaptureFile
+              }
+            >
+              Download PCAP
+            </button>
+          </div>
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={proofColdCache}
+              onChange={(e) => setProofColdCache(e.target.checked)}
+            />
+            Restart resolver (clear cache)
+          </label>
         </div>
-      </section>
+      </div>
+      <div className="status">
+        {proofStatus ||
+          'Use "Run Demo + Proof" to capture authoritative traffic and count upstream queries.'}
+      </div>
+      <pre className="output">{proofOutput || 'No proof output yet.'}</pre>
+    </section>
 
       <section className="card">
         <div className="card-title">Config Files (Lab API)</div>
