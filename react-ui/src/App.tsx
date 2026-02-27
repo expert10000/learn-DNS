@@ -302,46 +302,61 @@ function normalizeName(name: string) {
   return name.endsWith('.') ? name.slice(0, -1) : name;
 }
 
-function stripZone(name: string, zone: string) {
+function splitLabels(name: string) {
   const clean = normalizeName(name).toLowerCase();
-  const zoneClean = normalizeName(zone).toLowerCase();
-  if (clean === zoneClean) {
-    return '';
-  }
-  const suffix = `.${zoneClean}`;
-  if (clean.endsWith(suffix)) {
-    return clean.slice(0, -suffix.length);
-  }
-  return clean;
+  return clean.length ? clean.split('.') : [];
 }
 
-function cmpLabel(a: string, b: string) {
+function compareLabel(a: string, b: string) {
+  if (a.length !== b.length) {
+    return a.length < b.length ? -1 : 1;
+  }
   if (a === b) return 0;
   return a < b ? -1 : 1;
 }
 
+function compareName(a: string, b: string) {
+  const aLabels = splitLabels(a);
+  const bLabels = splitLabels(b);
+  let ai = aLabels.length - 1;
+  let bi = bLabels.length - 1;
+  while (ai >= 0 && bi >= 0) {
+    const cmp = compareLabel(aLabels[ai], bLabels[bi]);
+    if (cmp !== 0) {
+      return cmp;
+    }
+    ai -= 1;
+    bi -= 1;
+  }
+  if (ai < 0 && bi < 0) {
+    return 0;
+  }
+  return ai < 0 ? -1 : 1;
+}
+
 function isBetween(owner: string, next: string, candidate: string) {
-  const cmpOwnerNext = cmpLabel(owner, next);
-  const cmpOwnerCand = cmpLabel(owner, candidate);
-  const cmpCandNext = cmpLabel(candidate, next);
+  const cmpOwnerNext = compareName(owner, next);
+  const cmpOwnerCand = compareName(owner, candidate);
+  const cmpCandNext = compareName(candidate, next);
   if (cmpOwnerNext < 0) {
     return cmpOwnerCand < 0 && cmpCandNext < 0;
   }
   return cmpOwnerCand > 0 || cmpCandNext < 0;
 }
 
-function pickLabelBetween(owner: string, next: string) {
+function pickLabelBetween(owner: string, next: string, zone: string) {
   const candidates = ['a', 'b', 'c', 'm', 'n', 't', 'x', 'y', 'z', 'zz', 'zzz'];
   for (const cand of candidates) {
-    if (isBetween(owner, next, cand)) {
-      return cand;
+    const full = `${cand}.${zone}`;
+    if (isBetween(owner, next, full)) {
+      return full;
     }
   }
   for (let i = 0; i < 20; i += 1) {
     const rand = Math.random().toString(36).slice(2, 8);
-    const cand = `p-${rand}`;
-    if (isBetween(owner, next, cand)) {
-      return cand;
+    const full = `p-${rand}.${zone}`;
+    if (isBetween(owner, next, full)) {
+      return full;
     }
   }
   return null;
@@ -627,11 +642,9 @@ export default function App() {
       const first = await executeLabDig(firstReq);
       const interval = parseNsecInterval(first.output.text);
       if (interval) {
-        const ownerLabel = stripZone(interval.owner, zone);
-        const nextLabel = stripZone(interval.next, zone);
-        const picked = pickLabelBetween(ownerLabel, nextLabel);
+        const picked = pickLabelBetween(interval.owner, interval.next, zone);
         if (picked) {
-          secondReq = { ...base, name: `${picked}.${zone}` };
+          secondReq = { ...base, name: picked };
         }
       }
       const second = await executeLabDig(secondReq);
