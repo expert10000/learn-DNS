@@ -168,4 +168,31 @@ docker compose restart resolver
 
 ### Notes
 - These jobs are safe to run even if no keys changed; `ds_recompute` exits cleanly when DS is already current.
-- If you want more frequent checks, shorten the schedule (e.g., every 6 hours).
+more frequent checks, shorten the schedule (e.g., every 6 hours).
+
+
+
+
+
+
+Run Query (NSEC3 Proof / NXDOMAIN)
+
+status: NXDOMAIN
+flags: qr rd ra ad
+AUTHORITY: SOA + RRSIG + NSEC + RRSIG
+So it’s returning NSEC, not NSEC3. That means the zone is currently signed with NSEC (not NSEC3), even though the UI indicator says NSEC3.
+
+Run Demo (Aggressive NSEC)
+
+Query 1: nope1.example.test → NXDOMAIN + NSEC
+Query 2: nope2.example.test → NXDOMAIN + NSEC (from cache)
+This demo’s goal is to show that the second NXDOMAIN can be synthesized from cached denial records, reducing upstream authoritative queries. To prove that, you’d normally watch tcpdump or authoritative logs and see fewer upstream queries on the second request.
+
+What the buttons do in the UI
+Run Query: runs a single NXDOMAIN query with DNSSEC enabled against the validating resolver (nope1.example.test).
+Run Demo: runs two NXDOMAIN queries in a row (nope1, then nope2). With aggressive NSEC enabled, the second should be answered from cached denial data.
+Important: NSEC3 is not active yet
+Even though the zone file has NSEC3PARAM, BIND is still signing with NSEC (confirmed by live response).
+So the UI indicator is optimistic right now.
+
+If you want real NSEC3, we need to switch to an offline signing flow using dnssec-signzone -3 (or find a working inline NSEC3 config for this BIND build). I can implement that for both test. and example.test. and update the UI to detect actual NSEC3 in the signed zone.

@@ -70,6 +70,26 @@ From the untrusted client (should be refused):
 From the host (mapped to localhost port 5300):
 1. `dig @127.0.0.1 -p 5300 example.test +dnssec`
 
+## NSEC3 + Aggressive NSEC
+- `test.` and `example.test` are signed with **NSEC3** via `NSEC3PARAM` records
+  in the zone files (`bind9_parent/zones/db.test`, `bind9/zones/db.example.test`).
+- The validating resolver (`resolver`) uses **aggressive NSEC** to synthesize
+  NXDOMAIN answers from cached NSEC3 proofs.
+
+### Verify NSEC3 on the child zone
+```bash
+dig @172.31.0.11 nope1.example.test A +dnssec +multi
+```
+**Expected:** `status: NXDOMAIN` and `NSEC3` / `NSEC3PARAM` in the authority section.
+
+### Verify aggressive NSEC on the resolver
+```bash
+dig @172.32.0.20 nope1.example.test A +dnssec
+dig @172.32.0.20 nope2.example.test A +dnssec
+```
+**Expected:** the second NXDOMAIN can be answered from cached NSEC3, which reduces
+authoritative queries (confirm via tcpdump or logs if needed).
+
 ## Files
 - `docker-compose.yml`: lab topology and networks.
 - `bind9_parent/named.conf`: BIND9 configuration (parent/test).

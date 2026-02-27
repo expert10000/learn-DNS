@@ -57,6 +57,18 @@ type ConfigFileResponse = {
   content: string;
 };
 
+type IndicatorState = {
+  loading: boolean;
+  message: string;
+  nsec3Child?: boolean;
+  nsec3Parent?: boolean;
+  aggressiveNsec?: boolean;
+  childDetail?: string;
+  parentDetail?: string;
+  aggressiveDetail?: string;
+  updatedAt?: string;
+};
+
 type CaptureTarget = 'resolver' | 'authoritative';
 type CaptureFilter = 'dns' | 'dns+dot' | 'all';
 
@@ -195,6 +207,44 @@ function formatStatusLabel(rcode?: string, ad?: boolean): string {
   return `${rcode}${ad === undefined ? '' : ` (AD=${ad ? 'yes' : 'no'})`}`;
 }
 
+function formatIndicator(value?: boolean): string {
+  if (value === undefined) {
+    return 'unknown';
+  }
+  return value ? 'enabled' : 'not detected';
+}
+
+function indicatorClass(value?: boolean): string {
+  if (value === undefined) {
+    return 'unknown';
+  }
+  return value ? 'enabled' : 'disabled';
+}
+
+function parseNsec3FromZone(content: string) {
+  const hasRecord = content
+    .split('\n')
+    .some(
+      (line) =>
+        line.trim().length > 0 &&
+        !line.trim().startsWith(';') &&
+        /\bNSEC3PARAM\b/i.test(line)
+    );
+  return {
+    enabled: hasRecord,
+    detail: `NSEC3PARAM record: ${hasRecord ? 'present' : 'missing'}`,
+  };
+}
+
+function parseAggressiveNsec(content: string) {
+  const match = content.match(/aggressive-nsec\s*:\s*(yes|no)/i);
+  if (!match) {
+    return { enabled: false, detail: 'setting not found' };
+  }
+  const enabled = match[1].toLowerCase() === 'yes';
+  return { enabled, detail: `aggressive-nsec: ${match[1].toLowerCase()}` };
+}
+
 export default function App() {
   const [req, setReq] = useState<DigRequest>(DEFAULT_REQUEST);
   const [backend, setBackend] = useState<Backend>('client');
@@ -216,6 +266,10 @@ export default function App() {
   >({
     resolver: false,
     authoritative: false,
+  });
+  const [indicators, setIndicators] = useState<IndicatorState>({
+    loading: false,
+    message: 'Not loaded.',
   });
 
   const clientBase = `${API_BASE}/${req.client}`;
@@ -250,39 +304,139 @@ export default function App() {
   }, [groupPrefix, groupedFiles, configPath]);
 
   const runDig = async () => {
-    setIsBusy(true);
-    setStatus('Running dig...');
-    try {
-      const { client, resolver, ...body } = req;
-      if (backend === 'client') {
-        const server = resolverIpByClient[resolver][client];
-        const result = await postJson<ClientDigResponse>(
-          `${clientBase}/dig`,
-          { ...body, server }
-        );
-        const parsedRcode = parseDigRcode(result.output);
-        const parsedAd = parseDigAd(result.output);
-        const adFlag = parsedAd ?? result.ad;
-        setOutput({
+    await runDigWithRequest(req, 'Running dig...');
+  };
+
+  const executeDigRequest = async (
+    request: DigRequest
+  ): Promise<{
+    ok: boolean;
+    output: OutputView;
+    rcode?: string;
+    ad?: boolean;
+  }> => {
+    const { client, resolver, ...body } = request;
+    if (backend === 'client') {
+      const server = resolverIpByClient[resolver][client];
+      const result = await postJson<ClientDigResponse>(
+        `${API_BASE}/${client}/dig`,
+        { ...body, server }
+      );
+      const parsedRcode = parseDigRcode(result.output);
+      const parsedAd = parseDigAd(result.output);
+      const adFlag = parsedAd ?? result.ad;
+      return {
+        ok: result.ok,
+        output: {
           ok: result.ok,
           command: result.cmd.join(' '),
           text: result.output,
-        });
-        setStatus(formatStatusLabel(parsedRcode, adFlag));
-      } else {
-        const result = await postJson<LabDigResponse>(
-          `${LAB_API_BASE}/dig`,
-          { profile: client, resolver, ...body },
-          labHeaders
-        );
-        const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
-        const parsedRcode = parseDigRcode(text);
-        const parsedAd = parseDigAd(text);
-        setOutput({ ok: result.ok, command: result.command, text });
-        setStatus(
-          result.ok ? formatStatusLabel(parsedRcode, parsedAd) : 'Completed with errors'
-        );
-      }
+        },
+        rcode: parsedRcode,
+        ad: adFlag,
+      };
+    }
+
+    const result = await postJson<LabDigResponse>(
+      `${LAB_API_BASE}/dig`,
+      { profile: client, resolver, ...body },
+      labHeaders
+    );
+    const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+    const parsedRcode = parseDigRcode(text);
+    const parsedAd = parseDigAd(text);
+    return {
+      ok: result.ok,
+      output: { ok: result.ok, command: result.command, text },
+      rcode: parsedRcode,
+      ad: parsedAd,
+    };
+  };
+
+  const runDigWithRequest = async (request: DigRequest, label: string) => {
+    setIsBusy(true);
+    setStatus(label);
+    try {
+      const result = await executeDigRequest(request);
+      setOutput(result.output);
+      setStatus(
+        result.ok ? formatStatusLabel(result.rcode, result.ad) : 'Completed with errors'
+      );
+    } catch (err) {
+      setStatus((err as Error).message);
+      setOutput(null);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const applyNsec3ProofPreset = () => {
+    setReq({
+      ...req,
+      resolver: 'valid',
+      name: 'nope1.example.test',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    });
+    setStatus('Loaded NSEC3 proof preset.');
+  };
+
+  const runNsec3Proof = async () => {
+    const request: DigRequest = {
+      ...req,
+      resolver: 'valid',
+      name: 'nope1.example.test',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    };
+    setReq(request);
+    await runDigWithRequest(request, 'Running NSEC3 proof query...');
+  };
+
+  const runAggressiveNsecDemo = async () => {
+    const base: DigRequest = {
+      ...req,
+      resolver: 'valid',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    };
+    const firstReq: DigRequest = { ...base, name: 'nope1.example.test' };
+    const secondReq: DigRequest = { ...base, name: 'nope2.example.test' };
+
+    setReq(firstReq);
+    setIsBusy(true);
+    setStatus('Running aggressive NSEC demo (two NXDOMAIN queries)...');
+    try {
+      const first = await executeDigRequest(firstReq);
+      const second = await executeDigRequest(secondReq);
+      const combinedText = [
+        `# Query 1: ${firstReq.name}`,
+        first.output.command,
+        '',
+        first.output.text,
+        '',
+        `# Query 2: ${secondReq.name}`,
+        second.output.command,
+        '',
+        second.output.text,
+      ].join('\n');
+      setOutput({
+        ok: first.ok && second.ok,
+        command: 'dig (2 queries)',
+        text: combinedText,
+      });
+      setStatus(
+        `Aggressive NSEC demo completed. Q1: ${formatStatusLabel(
+          first.rcode,
+          first.ad
+        )}, Q2: ${formatStatusLabel(second.rcode, second.ad)}`
+      );
     } catch (err) {
       setStatus((err as Error).message);
       setOutput(null);
@@ -413,6 +567,89 @@ export default function App() {
       return;
     }
     void loadCaptures();
+  }, [missingLabKey]);
+
+  const loadIndicators = async () => {
+    if (missingLabKey) {
+      setIndicators({
+        loading: false,
+        message: 'Missing Lab API key.',
+      });
+      return;
+    }
+
+    setIndicators({ loading: true, message: 'Loading indicators...' });
+
+    let childEnabled: boolean | undefined;
+    let parentEnabled: boolean | undefined;
+    let aggressiveEnabled: boolean | undefined;
+    let childDetail = '';
+    let parentDetail = '';
+    let aggressiveDetail = '';
+
+    try {
+      const child = await getJson<ConfigFileResponse>(
+        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
+          'bind/zones/db.example.test'
+        )}`,
+        labHeaders
+      );
+      const parsed = parseNsec3FromZone(child.content);
+      childEnabled = parsed.enabled;
+      childDetail = parsed.detail;
+    } catch (err) {
+      childEnabled = undefined;
+      childDetail = (err as Error).message;
+    }
+
+    try {
+      const parent = await getJson<ConfigFileResponse>(
+        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
+          'bind_parent/zones/db.test'
+        )}`,
+        labHeaders
+      );
+      const parsed = parseNsec3FromZone(parent.content);
+      parentEnabled = parsed.enabled;
+      parentDetail = parsed.detail;
+    } catch (err) {
+      parentEnabled = undefined;
+      parentDetail = (err as Error).message;
+    }
+
+    try {
+      const unbound = await getJson<ConfigFileResponse>(
+        `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
+          'unbound/unbound.conf'
+        )}`,
+        labHeaders
+      );
+      const parsed = parseAggressiveNsec(unbound.content);
+      aggressiveEnabled = parsed.enabled;
+      aggressiveDetail = parsed.detail;
+    } catch (err) {
+      aggressiveEnabled = undefined;
+      aggressiveDetail = (err as Error).message;
+    }
+
+    setIndicators({
+      loading: false,
+      message: 'Indicators updated.',
+      nsec3Child: childEnabled,
+      nsec3Parent: parentEnabled,
+      aggressiveNsec: aggressiveEnabled,
+      childDetail,
+      parentDetail,
+      aggressiveDetail,
+      updatedAt: new Date().toLocaleString(),
+    });
+  };
+
+  useEffect(() => {
+    if (missingLabKey) {
+      return;
+    }
+    void loadIndicators();
   }, [missingLabKey]);
 
   const startCapture = async () => {
@@ -562,13 +799,28 @@ export default function App() {
               value={req.qtype}
               onChange={(e) => setReq({ ...req, qtype: e.target.value })}
             >
-              {['A', 'AAAA', 'NS', 'MX', 'TXT', 'SOA', 'CNAME', 'DNSKEY', 'DS'].map(
-                (t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                )
-              )}
+              {[
+                'A',
+                'AAAA',
+                'CAA',
+                'CNAME',
+                'DS',
+                'DNSKEY',
+                'MX',
+                'NS',
+                'NSEC',
+                'NSEC3',
+                'NSEC3PARAM',
+                'RRSIG',
+                'SOA',
+                'SRV',
+                'TXT',
+                'ANY',
+              ].map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -623,6 +875,77 @@ export default function App() {
         <pre className="output">
           {output ? `${output.command}\n\n${output.text}` : 'No output yet.'}
         </pre>
+      </section>
+
+      <section className="card">
+        <div className="card-title">NSEC3 / Aggressive NSEC</div>
+        <div className="hint">
+          <div>
+            <strong>NSEC3 signing:</strong> enabled on <code>test.</code> and{' '}
+            <code>example.test</code> via <code>NSEC3PARAM</code> records in the
+            zone files.
+          </div>
+          <div>
+            <strong>Aggressive NSEC:</strong> enabled on the validating resolver
+            (<code>aggressive-nsec: yes</code>).
+          </div>
+        </div>
+        <div className="indicator-row">
+          <div className={`indicator ${indicatorClass(indicators.nsec3Child)}`}>
+            <span className="indicator-dot" />
+            Child NSEC3: {formatIndicator(indicators.nsec3Child)}
+          </div>
+          <div className={`indicator ${indicatorClass(indicators.nsec3Parent)}`}>
+            <span className="indicator-dot" />
+            Parent NSEC3: {formatIndicator(indicators.nsec3Parent)}
+          </div>
+          <div className={`indicator ${indicatorClass(indicators.aggressiveNsec)}`}>
+            <span className="indicator-dot" />
+            Aggressive NSEC: {formatIndicator(indicators.aggressiveNsec)}
+          </div>
+        </div>
+        <div className="indicator-meta">
+          <div>Child: {indicators.childDetail || 'not checked'}</div>
+          <div>Parent: {indicators.parentDetail || 'not checked'}</div>
+          <div>Aggressive: {indicators.aggressiveDetail || 'not checked'}</div>
+          <div>
+            Status: {indicators.message}{' '}
+            {indicators.updatedAt ? `(${indicators.updatedAt})` : ''}
+          </div>
+        </div>
+        <div className="actions">
+          <button onClick={loadIndicators} disabled={isBusy || missingLabKey}>
+            Refresh Indicators
+          </button>
+        </div>
+        <div className="preset-grid">
+          <div className="preset">
+            <div className="preset-title">NSEC3 Proof (NXDOMAIN)</div>
+            <div className="preset-desc">
+              Query a non-existent name with DNSSEC enabled to see NSEC3 proof.
+            </div>
+            <div className="actions">
+              <button onClick={applyNsec3ProofPreset} disabled={isBusy}>
+                Load Preset
+              </button>
+              <button onClick={runNsec3Proof} disabled={isBusy}>
+                Run Query
+              </button>
+            </div>
+          </div>
+          <div className="preset">
+            <div className="preset-title">Aggressive NSEC Demo</div>
+            <div className="preset-desc">
+              Runs two NXDOMAIN queries; the second should be synthesized from cached
+              NSEC3.
+            </div>
+            <div className="actions">
+              <button onClick={runAggressiveNsecDemo} disabled={isBusy}>
+                Run Demo
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section className="card">

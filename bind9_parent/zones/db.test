@@ -1,12 +1,13 @@
 $TTL 300
 @   IN SOA ns1.test. admin.test. (
-        2026022702 ; serial
+        2026022703 ; serial
         1h         ; refresh
         15m        ; retry
         1w         ; expire
         5m         ; negative caching
 )
     IN NS  ns1.test.
+    IN NSEC3PARAM 1 0 10 A1B2
 
 ns1 IN A   172.31.0.10
 

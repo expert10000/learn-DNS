@@ -51,6 +51,7 @@ NAME_RE = re.compile(
 CONFIG_ROOT = Path("/config")
 CONFIG_DIRS = {
     "bind": CONFIG_ROOT / "bind",
+    "bind_parent": CONFIG_ROOT / "bind_parent",
     "unbound": CONFIG_ROOT / "unbound",
 }
 MAX_CONFIG_BYTES = 200_000
@@ -72,7 +73,24 @@ class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
     resolver: Literal["valid", "plain"] = "valid"
     name: str = Field(..., examples=["example.org"])
-    qtype: Literal["A", "AAAA", "NS", "MX", "TXT", "SOA", "CNAME", "DNSKEY", "DS"] = "A"
+    qtype: Literal[
+        "A",
+        "AAAA",
+        "CAA",
+        "CNAME",
+        "DS",
+        "DNSKEY",
+        "MX",
+        "NS",
+        "NSEC",
+        "NSEC3",
+        "NSEC3PARAM",
+        "RRSIG",
+        "SOA",
+        "SRV",
+        "TXT",
+        "ANY",
+    ] = "A"
     dnssec: bool = False
     trace: bool = False
     short: bool = False

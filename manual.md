@@ -171,6 +171,22 @@ dig @172.32.0.21 example.test A +dnssec
 ```
 **Look for:** no `ad` flag (no validation), though `RRSIG` may still appear in the answer.
 
+### Test 5c — NSEC3 proof (child zone)
+```bash
+docker exec -it dns_client sh
+dig @172.31.0.11 nope1.example.test A +dnssec +multi
+```
+**Expected:** `status: NXDOMAIN` and `NSEC3` / `NSEC3PARAM` records in the authority section.
+
+### Test 5d — Aggressive NSEC (validating resolver)
+```bash
+docker exec -it dns_client sh
+dig @172.32.0.20 nope1.example.test A +dnssec
+dig @172.32.0.20 nope2.example.test A +dnssec
+```
+**Expected:** the second NXDOMAIN can be synthesized from cached NSEC3 proofs.
+For evidence, watch upstream queries with tcpdump (section 2) or check authoritative logs.
+
 #### DNSSEC chain of trust (private lab, parent + child)
 - **Authoritative #1 (parent):** serves `test.`
 - **Authoritative #2 (child):** serves `example.test.` (signed)

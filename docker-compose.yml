@@ -184,6 +184,9 @@ services:
       - ./bind9/named.conf:/config/bind/named.conf:ro
       - ./bind9/zones:/config/bind/zones:ro
       - ./bind9/keys:/config/bind/keys:ro
+      - ./bind9_parent/named.conf:/config/bind_parent/named.conf:ro
+      - ./bind9_parent/zones:/config/bind_parent/zones:ro
+      - ./bind9_parent/keys:/config/bind_parent/keys:ro
       - ./unbound/unbound.conf:/config/unbound/unbound.conf:ro
       - ./unbound/root.hints:/config/unbound/root.hints:ro
       - ./anchors:/config/unbound/anchors:ro
@@ -227,16 +230,35 @@ services:
         set -e;
         echo "Waiting for test. KSK...";
         while true; do
-          f="$$(grep -l ' DNSKEY 257 ' /bind9_parent/keys/Ktest.+013+*.key 2>/dev/null | head -n1 || true)";
-          if [ -n "$$f" ]; then
-            grep -m1 ' DNSKEY 257 ' "$$f" | awk '{
-              name=$$1; type=$$4;
-              flags=$$5; proto=$$6; alg=$$7;
-              key=""; for (i=8; i<=NF; i++) key=key $$i;
-              print name, type, flags, proto, alg, key
-            }' > /anchors/test.key;
-            echo "Wrote /anchors/test.key";
-            break;
+          best_state="";
+          best_active=0;
+          for s in /bind9_parent/keys/Ktest.+013+*.state; do
+            [ -f "$$s" ] || continue;
+            ksk="$$(awk -F': ' '/^KSK:/{print $$2}' "$$s")";
+            goal="$$(awk -F': ' '/^GoalState:/{print $$2}' "$$s")";
+            active="$$(awk '/^Active:/{print $$2}' "$$s")";
+            if [ "$$ksk" = "yes" ] && [ "$$goal" = "omnipresent" ] && [ -n "$$active" ]; then
+              if [ "$$active" -gt "$$best_active" ]; then
+                best_active="$$active";
+                best_state="$$s";
+              fi;
+            fi;
+          done;
+          if [ -z "$$best_state" ]; then
+            best_state="$$(ls /bind9_parent/keys/Ktest.+013+*.state 2>/dev/null | head -n1 || true)";
+          fi;
+          if [ -n "$$best_state" ]; then
+            f="$${best_state%.state}.key";
+            if [ -f "$$f" ]; then
+              grep -m1 ' DNSKEY 257 ' "$$f" | awk '{
+                name=$$1; type=$$4;
+                flags=$$5; proto=$$6; alg=$$7;
+                key=""; for (i=8; i<=NF; i++) key=key $$i;
+                print name, type, flags, proto, alg, key
+              }' > /anchors/test.key;
+              echo "Wrote /anchors/test.key from $$f";
+              break;
+            fi;
           fi;
           sleep 1;
         done
