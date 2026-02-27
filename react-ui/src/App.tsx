@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import './index.css';
 
 type Client = 'trusted' | 'untrusted' | 'mgmt';
@@ -38,6 +38,7 @@ type OutputView = {
 };
 
 type ConfigGroup = 'authoritative' | 'resolver';
+type PrivacyTab = 'overview' | 'dot' | 'doh' | 'logs';
 
 type ConfigFile = {
   path: string;
@@ -132,6 +133,19 @@ type SigningSwitchResponse = {
   ok: boolean;
   mode: 'nsec' | 'nsec3';
   steps: SigningStep[];
+};
+
+type PrivacyCheckResponse = {
+  ok: boolean;
+  kind: 'dot' | 'doh';
+  endpoint: string;
+  method: string;
+  name: string;
+  qtype: string;
+  rcode?: string;
+  response_bytes: number;
+  elapsed_ms: number;
+  detail?: string;
 };
 
 const DEFAULT_REQUEST: DigRequest = {
@@ -378,12 +392,14 @@ export default function App() {
   const [backend, setBackend] = useState<Backend>('client');
   const [output, setOutput] = useState<OutputView | null>(null);
   const [status, setStatus] = useState<string>('');
+  const outputRef = useRef<HTMLDivElement | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [configFiles, setConfigFiles] = useState<ConfigFile[]>([]);
   const [configPath, setConfigPath] = useState<string>('');
   const [configContent, setConfigContent] = useState<string>('');
   const [configStatus, setConfigStatus] = useState<string>('');
   const [configGroup, setConfigGroup] = useState<ConfigGroup>('authoritative');
+  const [privacyTab, setPrivacyTab] = useState<PrivacyTab>('overview');
   const [captureTarget, setCaptureTarget] =
     useState<CaptureTarget>('resolver');
   const [captureFilter, setCaptureFilter] = useState<CaptureFilter>('dns');
@@ -404,6 +420,9 @@ export default function App() {
   const [proofCaptureFile, setProofCaptureFile] = useState('');
   const [proofColdCache, setProofColdCache] = useState(true);
   const [proofFlushCache, setProofFlushCache] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [privacyStatus, setPrivacyStatus] = useState('');
+  const [privacyOutput, setPrivacyOutput] = useState('');
   const [indicators, setIndicators] = useState<IndicatorState>({
     loading: false,
     message: 'Not loaded.',
@@ -503,6 +522,9 @@ export default function App() {
       setStatus((err as Error).message);
       setOutput(null);
     } finally {
+      if (outputRef.current) {
+        outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       setIsBusy(false);
     }
   };
@@ -550,6 +572,11 @@ export default function App() {
     };
     setReq(request);
     await runDigWithRequest(request, 'Running NSEC3 proof query...');
+  };
+
+  const clearOutput = () => {
+    setOutput(null);
+    setStatus('');
   };
 
   const applyQnameMinPreset = () => {
@@ -626,6 +653,9 @@ export default function App() {
       setStatus((err as Error).message);
       setOutput(null);
     } finally {
+      if (outputRef.current) {
+        outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       setIsBusy(false);
     }
   };
@@ -747,6 +777,12 @@ export default function App() {
     } finally {
       setProofBusy(false);
     }
+  };
+
+  const clearProofOutput = () => {
+    setProofOutput('');
+    setProofStatus('');
+    setProofCaptureFile('');
   };
 
   const checkHealth = async () => {
@@ -1090,6 +1126,53 @@ export default function App() {
     }
   };
 
+  const formatPrivacyResult = (result: PrivacyCheckResponse) => {
+    const lines = [
+      `kind: ${result.kind.toUpperCase()}`,
+      `endpoint: ${result.endpoint}`,
+      `method: ${result.method}`,
+      `query: ${result.name} ${result.qtype}`,
+      `rcode: ${result.rcode ?? 'unknown'}`,
+      `response_bytes: ${result.response_bytes}`,
+      `elapsed_ms: ${result.elapsed_ms}`,
+    ];
+    if (result.detail) {
+      lines.push(`detail: ${result.detail}`);
+    }
+    return lines.join('\n');
+  };
+
+  const runPrivacyCheck = async (kind: 'dot' | 'doh') => {
+    if (missingLabKey) {
+      setPrivacyStatus('Missing Lab API key.');
+      return;
+    }
+    setPrivacyBusy(true);
+    setPrivacyStatus(`Running ${kind.toUpperCase()} check...`);
+    setPrivacyOutput('');
+    try {
+      const result = await postJson<PrivacyCheckResponse>(
+        `${LAB_API_BASE}/privacy/${kind}-check`,
+        { name: req.name, qtype: req.qtype === 'AAAA' ? 'AAAA' : 'A' },
+        labHeaders
+      );
+      setPrivacyOutput(formatPrivacyResult(result));
+      if (!result.ok) {
+        setPrivacyStatus(`${kind.toUpperCase()} check failed`);
+      } else if (result.rcode === 'NOERROR') {
+        setPrivacyStatus(`${kind.toUpperCase()} check OK (NOERROR)`);
+      } else {
+        setPrivacyStatus(
+          `${kind.toUpperCase()} check completed (${result.rcode ?? 'unknown'})`
+        );
+      }
+    } catch (err) {
+      setPrivacyStatus((err as Error).message);
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <header className="header">
@@ -1237,7 +1320,7 @@ export default function App() {
         <div className="status">{status || 'Ready.'}</div>
       </section>
 
-      <section className="card">
+      <section className="card" ref={outputRef}>
         <div className="card-title">Output</div>
         <pre className="output">
           {output ? `${output.command}\n\n${output.text}` : 'No output yet.'}
@@ -1322,6 +1405,9 @@ export default function App() {
               <button onClick={runNsec3Proof} disabled={isBusy}>
                 Run Query
               </button>
+              <button onClick={clearOutput} disabled={isBusy}>
+                Clear Output
+              </button>
             </div>
           </div>
           <div className="preset">
@@ -1335,6 +1421,9 @@ export default function App() {
               </button>
               <button onClick={runQnameMin} disabled={isBusy}>
                 Run Query
+              </button>
+              <button onClick={clearOutput} disabled={isBusy}>
+                Clear Output
               </button>
             </div>
           </div>
@@ -1361,6 +1450,9 @@ export default function App() {
               }
             >
               Download PCAP
+            </button>
+            <button onClick={clearProofOutput} disabled={isBusy || proofBusy}>
+              Clear Proof
             </button>
           </div>
           <label className="toggle">
@@ -1396,6 +1488,196 @@ export default function App() {
           'Use "Run Demo + Proof" to capture authoritative traffic and count upstream queries.'}
       </div>
       <pre className="output">{proofOutput || 'No proof output yet.'}</pre>
+    </section>
+
+    <section className="card">
+      <div className="card-title">DNS Query Privacy</div>
+      <div className="hint">
+        Transport privacy and log minimization (DoT, DoH, QNAME minimization).
+      </div>
+      <div className="indicator-row">
+        <div className={`indicator ${indicatorClass(indicators.qnameMinim)}`}>
+          <span className="indicator-dot" />
+          QNAME Minimization: {formatIndicator(indicators.qnameMinim)}
+        </div>
+        <div className="indicator enabled">
+          <span className="indicator-dot" />
+          DoT: configured
+        </div>
+        <div className="indicator enabled">
+          <span className="indicator-dot" />
+          DoH: configured
+        </div>
+        <div className="indicator enabled">
+          <span className="indicator-dot" />
+          Logs: minimized
+        </div>
+      </div>
+      <div className="config-tabs privacy-tabs">
+        <button
+          className={privacyTab === 'overview' ? 'active' : ''}
+          onClick={() => setPrivacyTab('overview')}
+          disabled={isBusy}
+        >
+          Overview
+        </button>
+        <button
+          className={privacyTab === 'dot' ? 'active' : ''}
+          onClick={() => setPrivacyTab('dot')}
+          disabled={isBusy}
+        >
+          DoT
+        </button>
+        <button
+          className={privacyTab === 'doh' ? 'active' : ''}
+          onClick={() => setPrivacyTab('doh')}
+          disabled={isBusy}
+        >
+          DoH
+        </button>
+        <button
+          className={privacyTab === 'logs' ? 'active' : ''}
+          onClick={() => setPrivacyTab('logs')}
+          disabled={isBusy}
+        >
+          Logs
+        </button>
+      </div>
+
+      {privacyTab === 'overview' && (
+        <div className="privacy-panel">
+          <div className="privacy-block">
+            <div className="privacy-title">What it protects</div>
+            <ul>
+              <li>Observation of DNS queries (who, what, when).</li>
+              <li>Metadata leakage from deep names.</li>
+            </ul>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">In this lab</div>
+            <ul>
+              <li>QNAME minimization in Unbound.</li>
+              <li>DoT on resolver (TCP 853, TLS).</li>
+              <li>DoH sidecar proxy on HTTPS 443.</li>
+              <li>Query logging disabled in Unbound and BIND.</li>
+            </ul>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Risks / tradeoffs</div>
+            <ul>
+              <li>Centralization with large DoH providers.</li>
+              <li>Harder enterprise filtering and monitoring.</li>
+              <li>DoH can bypass local split-horizon policy.</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {privacyTab === 'dot' && (
+        <div className="privacy-panel">
+          <div className="privacy-block">
+            <div className="privacy-title">Endpoint</div>
+            <div className="privacy-text">
+              DoT proxy is exposed on <code>127.0.0.1:853</code> (TCP).
+            </div>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Quick check</div>
+            <pre className="output compact">
+              {`openssl s_client -connect 127.0.0.1:853 -servername resolver.test`}
+            </pre>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Query example</div>
+            <pre className="output compact">
+              {`kdig +tls @127.0.0.1 -p 853 www.example.test`}
+            </pre>
+            <div className="privacy-text">
+              Self-signed certs are generated on startup in{' '}
+              <code>dot_proxy/certs</code>.
+            </div>
+          </div>
+          <div className="privacy-actions">
+            <button
+              onClick={() => runPrivacyCheck('dot')}
+              disabled={privacyBusy || missingLabKey}
+            >
+              Run DoT Check
+            </button>
+          </div>
+        </div>
+      )}
+
+      {privacyTab === 'doh' && (
+        <div className="privacy-panel">
+          <div className="privacy-block">
+            <div className="privacy-title">Endpoint</div>
+            <div className="privacy-text">
+              DoH proxy is exposed at <code>https://127.0.0.1:8443/dns-query</code>.
+            </div>
+            <div className="privacy-text">
+              Health check: <code>https://127.0.0.1:8443/health</code>
+            </div>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Quick check</div>
+            <pre className="output compact">
+              {`curl -k https://127.0.0.1:8443/health`}
+            </pre>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Notes</div>
+            <ul>
+              <li>Self-signed TLS cert (accept or skip verification).</li>
+              <li>Upstream is the validating resolver on port 53.</li>
+            </ul>
+          </div>
+          <div className="privacy-actions">
+            <button
+              onClick={() => runPrivacyCheck('doh')}
+              disabled={privacyBusy || missingLabKey}
+            >
+              Run DoH Check
+            </button>
+          </div>
+        </div>
+      )}
+
+      {privacyTab === 'logs' && (
+        <div className="privacy-panel">
+          <div className="privacy-block">
+            <div className="privacy-title">Unbound</div>
+            <ul>
+              <li>
+                <code>log-queries: no</code>, <code>log-replies: no</code>,
+                <code>log-local-actions: no</code>
+              </li>
+              <li>
+                <code>log-tag-queryreply: no</code>, <code>log-servfail: no</code>
+              </li>
+            </ul>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">BIND</div>
+            <ul>
+              <li>
+                <code>category queries &#123; null; &#125;</code>
+              </li>
+              <li>
+                <code>category client &#123; null; &#125;</code>
+              </li>
+            </ul>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Why</div>
+            <div className="privacy-text">
+              Minimizes retained query metadata while preserving operational logs.
+            </div>
+          </div>
+        </div>
+      )}
+      <div className="status">{privacyStatus || 'Ready.'}</div>
+      <pre className="output">{privacyOutput || 'No privacy checks yet.'}</pre>
     </section>
 
       <section className="card">

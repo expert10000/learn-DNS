@@ -241,6 +241,8 @@ Cache controls:
 
 Upstream query count:
 - Cold cache usually shows 2 (DNSKEY + NXDOMAIN proof).
+- Sometimes you will see 3 on a fully cold cache because the resolver also
+  fetches the parent `DS` for `example.test` (from `test.`) before validating.
 - If you want the summary to show 1, pre-warm DNSKEY first:
   `dig @172.32.0.20 example.test DNSKEY +dnssec`
 
@@ -251,6 +253,41 @@ QNAME minimization is enabled in `unbound/unbound.conf` via
 UI demo:
 - Use the QNAME Minimization (Privacy) preset (e.g., `deep.sub.example.test`).
 - Check the QNAME indicator to confirm minimisation is enabled.
+
+### DNS Query Privacy (Concepts)
+This is a conceptual overview. The lab implements QNAME minimization, DoT, DoH,
+and log minimization.
+
+What it protects:
+- Eavesdropping on DNS queries (who, what, and when someone resolves).
+
+Mechanisms / topics:
+- DoT (DNS-over-TLS): classic TLS channel to the resolver.
+- DoH (DNS-over-HTTPS): DNS over HTTP/2/3, easier to blend into web traffic.
+- ECH / SNI privacy: broader TLS privacy, affects DoH visibility.
+- Log minimization, retention, anonymization (RODO / privacy-by-design).
+
+Risks / downsides:
+- Centralization (large DoH providers).
+- Harder filtering in enterprise networks.
+- DoH can bypass local policies (split-horizon, filtering).
+
+### DNS Query Privacy (Implemented)
+What is implemented in this lab:
+- DoT (DNS-over-TLS) via `dot_proxy` (port 853).
+- DoH (DNS-over-HTTPS) via a sidecar proxy (`doh_proxy`).
+- Log minimization in Unbound and BIND (no query logging).
+
+DoT details:
+- Implemented via `dot_proxy` (TLS-terminating sidecar forwarding to the resolver).
+- TLS certs are generated on startup into `dot_proxy/certs/` (self-signed).
+- Host port mapping: `127.0.0.1:853 -> dot_proxy:853/tcp`.
+- Use a DoT-capable client (e.g., `kdig +tls @127.0.0.1 -p 853 www.example.test`).
+
+DoH details:
+- Service: `doh_proxy` (HTTPS on `127.0.0.1:8443`).
+- Endpoint: `https://127.0.0.1:8443/dns-query`
+- Self-signed cert; clients must trust or skip verification (`-k` in curl).
 
 ## Future Improvement
 Option A: add a dedicated aggressive demo resolver that is authoritative for

@@ -52,6 +52,7 @@ services:
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
       - ./unbound/start.sh:/opt/unbound/etc/unbound/start.sh:ro
       - ./anchors:/opt/unbound/etc/unbound/anchors
+      - ./unbound/tls:/opt/unbound/etc/unbound/tls
       - ./unbound/log:/var/log/unbound
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     # Optional: expose ONLY to localhost on the VM (host-side dig via tunnel)
@@ -79,11 +80,45 @@ services:
       - ./unbound/unbound.plain.conf:/opt/unbound/etc/unbound/unbound.conf:ro
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
       - ./unbound/start_plain.sh:/opt/unbound/etc/unbound/start.sh:ro
+      - ./unbound/tls:/opt/unbound/etc/unbound/tls
       - ./unbound/log_plain:/var/log/unbound
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     ports:
       - "127.0.0.1:5301:53/udp"
       - "127.0.0.1:5301:53/tcp"
+
+  dot_proxy:
+    build:
+      context: ./dot_proxy
+    container_name: dns_dot_proxy
+    restart: unless-stopped
+    environment:
+      - UPSTREAM_HOST=172.30.0.20
+      - UPSTREAM_PORT=53
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.81
+    volumes:
+      - ./dot_proxy/certs:/certs
+    ports:
+      - "127.0.0.1:853:853/tcp"
+
+  doh_proxy:
+    build:
+      context: ./doh_proxy
+    container_name: dns_doh_proxy
+    restart: unless-stopped
+    environment:
+      - UPSTREAM_DNS=172.30.0.20
+      - UPSTREAM_PORT=53
+      - UPSTREAM_TIMEOUT=2.0
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.80
+    volumes:
+      - ./doh_proxy/certs:/certs
+    ports:
+      - "127.0.0.1:8443:443"
 
   client:
     build:
@@ -166,6 +201,11 @@ services:
       - CAPTURE_AUTHORITATIVE_CONTAINER=dns_capture_authoritative
       - AUTH_CHILD_IP=172.31.0.11
       - RESOLVER_CORE_IP=172.31.0.20
+      - DOT_RESOLVER_IP=172.30.0.81
+      - DOT_RESOLVER_PORT=853
+      - DOH_PROXY_HOST=172.30.0.80
+      - DOH_PROXY_PORT=443
+      - DOH_PROXY_PATH=/dns-query
     networks:
       client_net:
         ipv4_address: 172.32.0.90

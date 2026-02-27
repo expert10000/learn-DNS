@@ -1,6 +1,12 @@
 import os
 import re
 import subprocess
+import http.client
+import secrets
+import socket
+import ssl
+import struct
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
@@ -71,6 +77,11 @@ CAPTURE_FILTERS = {
 
 AUTH_CHILD_IP = os.getenv("AUTH_CHILD_IP", "172.31.0.11")
 RESOLVER_CORE_IP = os.getenv("RESOLVER_CORE_IP", "172.31.0.20")
+DOT_RESOLVER_IP = os.getenv("DOT_RESOLVER_IP", "172.30.0.20")
+DOT_RESOLVER_PORT = int(os.getenv("DOT_RESOLVER_PORT", "853"))
+DOH_PROXY_HOST = os.getenv("DOH_PROXY_HOST", "172.30.0.80")
+DOH_PROXY_PORT = int(os.getenv("DOH_PROXY_PORT", "443"))
+DOH_PROXY_PATH = os.getenv("DOH_PROXY_PATH", "/dns-query")
 
 SIGNING_SWITCHER_CONTAINER = os.getenv(
     "SIGNING_SWITCHER_CONTAINER", "dns_signing_switcher"
@@ -211,6 +222,22 @@ class ResolverFlushResponse(BaseModel):
     stdout: str
     stderr: str
 
+class PrivacyCheckRequest(BaseModel):
+    name: str = "www.example.test"
+    qtype: Literal["A", "AAAA"] = "A"
+
+class PrivacyCheckResponse(BaseModel):
+    ok: bool
+    kind: Literal["dot", "doh"]
+    endpoint: str
+    method: str
+    name: str
+    qtype: str
+    rcode: Optional[str] = None
+    response_bytes: int = 0
+    elapsed_ms: int = 0
+    detail: Optional[str] = None
+
 def require_key(x_api_key: Optional[str]):
     if not API_KEY:
         raise HTTPException(status_code=500, detail="Server missing LAB_API_KEY env")
@@ -241,6 +268,97 @@ def run_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
             stdout=e.stdout or "",
             stderr=(e.stderr or "") + "\nTIMEOUT",
         )
+
+def _dns_qtype(value: str) -> int:
+    return {"A": 1, "AAAA": 28}[value]
+
+def _encode_name(name: str) -> bytes:
+    labels = name.strip().rstrip(".").split(".") if name.strip() else []
+    if not labels:
+        return b"\x00"
+    out = bytearray()
+    for label in labels:
+        if not label:
+            continue
+        part = label.encode("ascii", errors="ignore")
+        if len(part) > 63:
+            raise HTTPException(status_code=400, detail="Label too long")
+        out.append(len(part))
+        out.extend(part)
+    out.append(0)
+    return bytes(out)
+
+def _build_query(name: str, qtype: str) -> tuple[int, bytes]:
+    qid = secrets.randbelow(65535)
+    flags = 0x0100
+    qdcount = 1
+    header = struct.pack("!HHHHHH", qid, flags, qdcount, 0, 0, 0)
+    qname = _encode_name(name)
+    qtype_id = _dns_qtype(qtype)
+    question = qname + struct.pack("!HH", qtype_id, 1)
+    return qid, header + question
+
+def _parse_rcode(response: bytes) -> Optional[str]:
+    if len(response) < 4:
+        return None
+    flags = struct.unpack("!H", response[2:4])[0]
+    rcode = flags & 0x000F
+    return {
+        0: "NOERROR",
+        1: "FORMERR",
+        2: "SERVFAIL",
+        3: "NXDOMAIN",
+        4: "NOTIMP",
+        5: "REFUSED",
+    }.get(rcode, f"RCODE={rcode}")
+
+def _dot_query(name: str, qtype: str) -> tuple[int, Optional[str], str, int]:
+    qid, query = _build_query(name, qtype)
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    start = time.perf_counter()
+    with socket.create_connection((DOT_RESOLVER_IP, DOT_RESOLVER_PORT), timeout=4) as sock:
+        with context.wrap_socket(sock, server_hostname="resolver.test") as tls:
+            tls.sendall(struct.pack("!H", len(query)) + query)
+            head = tls.recv(2)
+            if len(head) != 2:
+                raise HTTPException(status_code=502, detail="Short DoT response")
+            resp_len = struct.unpack("!H", head)[0]
+            response = bytearray()
+            while len(response) < resp_len:
+                chunk = tls.recv(resp_len - len(response))
+                if not chunk:
+                    break
+                response.extend(chunk)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    rcode = _parse_rcode(bytes(response))
+    detail = f"qid={qid}"
+    return elapsed_ms, rcode, detail, len(response)
+
+def _doh_query(name: str, qtype: str) -> tuple[int, Optional[str], str, int]:
+    _, query = _build_query(name, qtype)
+    context = ssl._create_unverified_context()
+    start = time.perf_counter()
+    conn = http.client.HTTPSConnection(
+        DOH_PROXY_HOST, DOH_PROXY_PORT, context=context, timeout=4
+    )
+    conn.request(
+        "POST",
+        DOH_PROXY_PATH,
+        body=query,
+        headers={
+            "content-type": "application/dns-message",
+            "accept": "application/dns-message",
+        },
+    )
+    resp = conn.getresponse()
+    data = resp.read()
+    conn.close()
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    rcode = _parse_rcode(data)
+    detail = f"http={resp.status}"
+    return elapsed_ms, rcode, detail, len(data)
 
 def list_config_files() -> list[ConfigFile]:
     files: list[ConfigFile] = []
@@ -555,6 +673,56 @@ def resolver_flush(
         stdout=res.stdout,
         stderr=res.stderr,
     )
+
+@app.post("/privacy/dot-check", response_model=PrivacyCheckResponse)
+def privacy_dot_check(
+    req: PrivacyCheckRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    name = validate_name(req.name)
+    try:
+        elapsed_ms, rcode, detail, size = _dot_query(name, req.qtype)
+        return PrivacyCheckResponse(
+            ok=True,
+            kind="dot",
+            endpoint=f"{DOT_RESOLVER_IP}:{DOT_RESOLVER_PORT}",
+            method="TLS",
+            name=name,
+            qtype=req.qtype,
+            rcode=rcode,
+            response_bytes=size,
+            elapsed_ms=elapsed_ms,
+            detail=detail,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+@app.post("/privacy/doh-check", response_model=PrivacyCheckResponse)
+def privacy_doh_check(
+    req: PrivacyCheckRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    name = validate_name(req.name)
+    try:
+        elapsed_ms, rcode, detail, size = _doh_query(name, req.qtype)
+        return PrivacyCheckResponse(
+            ok=True,
+            kind="doh",
+            endpoint=f"https://{DOH_PROXY_HOST}:{DOH_PROXY_PORT}{DOH_PROXY_PATH}",
+            method="HTTPS",
+            name=name,
+            qtype=req.qtype,
+            rcode=rcode,
+            response_bytes=size,
+            elapsed_ms=elapsed_ms,
+            detail=detail,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
 @app.get("/capture/summary", response_model=CaptureSummaryResponse)
 def capture_summary(
