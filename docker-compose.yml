@@ -52,6 +52,8 @@ services:
         ipv4_address: 172.33.0.20
       mgmt_net:
         ipv4_address: 172.30.0.20
+      public_net:
+        ipv4_address: 172.34.0.20
     volumes:
       - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
@@ -63,8 +65,12 @@ services:
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     # Optional: expose ONLY to localhost on the VM (host-side dig via tunnel)
     ports:
-      - "127.0.0.1:5300:53/udp"
-      - "127.0.0.1:5300:53/tcp"
+    #  - "127.0.0.1:5300:53/udp"
+    #  - "127.0.0.1:5300:53/tcp"
+      - "5300:53/udp"
+      - "5300:53/tcp"
+
+
 
   resolver_plain:
     build:
@@ -84,6 +90,8 @@ services:
         ipv4_address: 172.33.0.21
       mgmt_net:
         ipv4_address: 172.30.0.21
+      public_net:
+        ipv4_address: 172.34.0.21
     volumes:
       - ./unbound/unbound.plain.conf:/opt/unbound/etc/unbound/unbound.conf:ro
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
@@ -92,8 +100,10 @@ services:
       - ./unbound/log_plain:/var/log/unbound
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     ports:
-      - "127.0.0.1:5301:53/udp"
-      - "127.0.0.1:5301:53/tcp"
+      #- "127.0.0.1:5301:53/udp"
+      #- "127.0.0.1:5301:53/tcp"
+      - "5301:53/udp"
+      - "5301:53/tcp"
 
   dot_proxy:
     build:
