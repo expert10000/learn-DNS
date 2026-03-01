@@ -3242,6 +3242,18 @@ export default function App() {
           </button>
         </div>
 
+        <div className="section-title">CLI shortcuts (host / WSL)</div>
+        <div className="hint">
+          Use the host-mapped resolvers. On Windows, run via WSL or install BIND tools
+          so <code>dig</code> / <code>delv</code> are available.
+        </div>
+        <pre className="output compact">{`# Validating resolver (host)
+dig @127.0.0.1 -p 5300 ${req.name} ${req.qtype} +dnssec
+delv @127.0.0.1 -p 5300 ${req.name} ${req.qtype}
+
+# Plain resolver (host)
+dig @127.0.0.1 -p 5301 ${req.name} ${req.qtype}`}</pre>
+
         <div className="status">{status || 'Ready.'}</div>
       </section>
       )}
