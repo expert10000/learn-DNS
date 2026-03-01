@@ -18,7 +18,9 @@ services:
     # No published ports: reachable only inside Docker networks.
 
   authoritative_child:
-    image: internetsystemsconsortium/bind9:9.18
+    build:
+      context: ./bind9
+      dockerfile: Dockerfile
     container_name: dns_authoritative_child
     restart: unless-stopped
     networks:
@@ -29,10 +31,13 @@ services:
       - ./bind9/zones:/etc/bind/zones
       - ./bind9/keys:/etc/bind/keys
       - ./bind9/log:/var/log/bind
+      - ./captures:/captures
     # No published ports: reachable only inside Docker networks.
 
   resolver:
-    image: mvance/unbound:1.20.0
+    build:
+      context: ./unbound
+      dockerfile: Dockerfile
     container_name: dns_resolver
     restart: unless-stopped
     depends_on:
@@ -54,6 +59,7 @@ services:
       - ./anchors:/opt/unbound/etc/unbound/anchors
       - ./unbound/tls:/opt/unbound/etc/unbound/tls
       - ./unbound/log:/var/log/unbound
+      - ./captures:/captures
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     # Optional: expose ONLY to localhost on the VM (host-side dig via tunnel)
     ports:
@@ -61,7 +67,9 @@ services:
       - "127.0.0.1:5300:53/tcp"
 
   resolver_plain:
-    image: mvance/unbound:1.20.0
+    build:
+      context: ./unbound
+      dockerfile: Dockerfile
     container_name: dns_resolver_plain
     restart: unless-stopped
     depends_on:
@@ -127,6 +135,8 @@ services:
     environment:
       - PROFILE=trusted
       - DEFAULT_DNS_SERVER=172.32.0.20
+      - CLIENT_API_KEY=change_me_long_random_client
+      - CLIENT_RATE_LIMIT_PER_MIN=120
     networks:
       client_net:
         ipv4_address: 172.32.0.50
@@ -138,6 +148,8 @@ services:
     environment:
       - PROFILE=untrusted
       - DEFAULT_DNS_SERVER=172.33.0.20
+      - CLIENT_API_KEY=change_me_long_random_client
+      - CLIENT_RATE_LIMIT_PER_MIN=120
     networks:
       untrusted_net:
         ipv4_address: 172.33.0.50
@@ -149,6 +161,8 @@ services:
     environment:
       - PROFILE=mgmt
       - DEFAULT_DNS_SERVER=172.30.0.20
+      - CLIENT_API_KEY=change_me_long_random_client
+      - CLIENT_RATE_LIMIT_PER_MIN=120
     networks:
       mgmt_net:
         ipv4_address: 172.30.0.50
@@ -166,6 +180,17 @@ services:
         ipv4_address: 172.31.0.60
       untrusted_net:
         ipv4_address: 172.33.0.60
+
+  perf_tools:
+    build:
+      context: ./perf_tools
+    container_name: dns_perf_tools
+    command: ["sh", "-lc", "sleep infinity"]
+    networks:
+      client_net:
+      dns_core:
+    volumes:
+      - ./:/work
 
   # -------------------------
   # Option 1: Portainer (GUI exec/logs)
@@ -197,8 +222,15 @@ services:
     restart: unless-stopped
     environment:
       - LAB_API_KEY=change_me_long_random
-      - CAPTURE_RESOLVER_CONTAINER=dns_capture_resolver
-      - CAPTURE_AUTHORITATIVE_CONTAINER=dns_capture_authoritative
+      - LAB_API_ALLOW_DOCKER=1
+      - LAB_API_RATE_LIMIT_PER_MIN=120
+      - LAB_API_RATE_LIMIT_WINDOW_S=60
+      - LAB_API_AUDIT_LOG=/var/log/lab_api/audit.log
+      - AUTH_AGENT_URL=http://dns_agent_authoritative:8081
+      - RESOLVER_AGENT_URL=http://dns_agent_resolver:8081
+      - AGENT_API_KEY=change_me_agent
+      - CAPTURE_RESOLVER_CONTAINER=dns_resolver
+      - CAPTURE_AUTHORITATIVE_CONTAINER=dns_authoritative_child
       - AUTH_CHILD_IP=172.31.0.11
       - RESOLVER_CORE_IP=172.31.0.20
       - DOT_RESOLVER_IP=172.30.0.81
@@ -206,6 +238,7 @@ services:
       - DOH_PROXY_HOST=172.30.0.80
       - DOH_PROXY_PORT=443
       - DOH_PROXY_PATH=/dns-query
+      - PERF_TOOLS_CONTAINER=dns_perf_tools
     networks:
       client_net:
         ipv4_address: 172.32.0.90
@@ -223,16 +256,61 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./bind9/log:/logs/bind:ro
       - ./unbound/log:/logs/unbound:ro
-      - ./bind9/named.conf:/config/bind/named.conf:ro
-      - ./bind9/zones:/config/bind/zones:ro
-      - ./bind9/keys:/config/bind/keys:ro
-      - ./bind9_parent/named.conf:/config/bind_parent/named.conf:ro
-      - ./bind9_parent/zones:/config/bind_parent/zones:ro
-      - ./bind9_parent/keys:/config/bind_parent/keys:ro
-      - ./unbound/unbound.conf:/config/unbound/unbound.conf:ro
+      - ./bind9:/config/bind:rw
+      - ./bind9_parent:/config/bind_parent:rw
+      - ./unbound/unbound.conf:/config/unbound/unbound.conf:rw
+      - ./unbound/unbound.plain.conf:/config/unbound/unbound.plain.conf:rw
       - ./unbound/root.hints:/config/unbound/root.hints:ro
       - ./anchors:/config/unbound/anchors:ro
       - ./captures:/captures
+      - ./lab_api/log:/var/log/lab_api
+
+  agent_authoritative:
+    build: ./agent_api
+    container_name: dns_agent_authoritative
+    restart: unless-stopped
+    environment:
+      - AGENT_ROLE=authoritative
+      - AGENT_API_KEY=change_me_agent
+      - AGENT_LOG_DIRS=bind=/logs/bind,bind_parent=/logs/bind_parent
+      - AGENT_CONFIG_ROOTS=bind=/config/bind,bind_parent=/config/bind_parent
+      - AGENT_STATUS_TARGETS=authoritative_parent=172.31.0.10:53,authoritative_child=172.31.0.11:53
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.91
+      dns_core:
+        ipv4_address: 172.31.0.91
+    volumes:
+      - ./bind9/named.conf:/config/bind/named.conf:ro
+      - ./bind9/zones:/config/bind/zones:ro
+      - ./bind9/keys:/config/bind/keys:ro
+      - ./bind9/log:/logs/bind:ro
+      - ./bind9_parent/named.conf:/config/bind_parent/named.conf:ro
+      - ./bind9_parent/zones:/config/bind_parent/zones:ro
+      - ./bind9_parent/keys:/config/bind_parent/keys:ro
+      - ./bind9_parent/log:/logs/bind_parent:ro
+
+  agent_resolver:
+    build: ./agent_api
+    container_name: dns_agent_resolver
+    restart: unless-stopped
+    environment:
+      - AGENT_ROLE=resolver
+      - AGENT_API_KEY=change_me_agent
+      - AGENT_LOG_DIRS=unbound=/logs/unbound,unbound_plain=/logs/unbound_plain
+      - AGENT_CONFIG_ROOTS=unbound=/config/unbound
+      - AGENT_STATUS_TARGETS=resolver=172.31.0.20:53,resolver_plain=172.31.0.21:53
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.92
+      dns_core:
+        ipv4_address: 172.31.0.92
+    volumes:
+      - ./unbound/unbound.conf:/config/unbound/unbound.conf:ro
+      - ./unbound/unbound.plain.conf:/config/unbound/unbound.plain.conf:ro
+      - ./unbound/root.hints:/config/unbound/root.hints:ro
+      - ./unbound/log:/logs/unbound:ro
+      - ./unbound/log_plain:/logs/unbound_plain:ro
 
   capture_resolver:
     image: nicolaka/netshoot:latest
@@ -368,6 +446,7 @@ services:
         VITE_API_BASE: "/api"
         VITE_LAB_API_BASE: "/lab-api"
         VITE_LAB_API_KEY: "change_me_long_random"
+        VITE_CLIENT_API_KEY: "change_me_long_random_client"
     container_name: dns_react_ui
     restart: unless-stopped
     networks:

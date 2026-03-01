@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="620" viewBox="0 0 900 620">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f3f4f6"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="900" height="620" rx="24" fill="url(#bg)"/>
+  <rect x="32" y="32" width="836" height="556" rx="18" fill="#ffffff" stroke="#e5e7eb"/>
+  <text x="60" y="80" font-family="Space Grotesk, Arial, sans-serif" font-size="20" fill="#0f172a" font-weight="700">
+    1) Co warto miec w React UI (MVP, realnie przydatne)
+  </text>
+
+  <text x="60" y="130" font-family="DM Sans, Arial, sans-serif" font-size="16" fill="#0f172a" font-weight="600">
+    A. Nodes / Topology (lista wezlow + status)
+  </text>
+  <text x="80" y="160" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - rola: authoritative / resolver / client / capture / signer
+  </text>
+  <text x="80" y="182" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - IP w sieci labowej, porty (53/udp,tcp; 8000; 5173)
+  </text>
+  <text x="80" y="204" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - health (up/down + uptime)
+  </text>
+  <text x="80" y="226" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - krotkie metadane: image tag, container name, networks
+  </text>
+  <text x="80" y="250" font-family="DM Sans, Arial, sans-serif" font-size="13" fill="#64748b">
+    Portainer pokazuje kontenery, ale nie model labu.
+  </text>
+
+  <text x="60" y="310" font-family="DM Sans, Arial, sans-serif" font-size="16" fill="#0f172a" font-weight="600">
+    B. Configs (podglad konfiguracji + diff)
+  </text>
+  <text x="80" y="340" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - unbound.conf + unbound.plain.conf (resolver)
+  </text>
+  <text x="80" y="362" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - named.conf + zone file (authoritative)
+  </text>
+  <text x="80" y="384" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - DNSSEC ON/OFF, Aggressive NSEC ON/OFF (pokaz stan)
+  </text>
+
+  <text x="60" y="440" font-family="DM Sans, Arial, sans-serif" font-size="16" fill="#0f172a" font-weight="600">
+    W UI:
+  </text>
+  <text x="80" y="470" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - podglad plikow (read-only), syntax highlight
+  </text>
+  <text x="80" y="492" font-family="DM Sans, Arial, sans-serif" font-size="14" fill="#334155">
+    - przycisk "export config bundle" (zip: config + wersje)
+  </text>
+</svg>

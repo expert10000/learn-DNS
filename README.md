@@ -19,8 +19,7 @@ The resolvers only allow recursion from the trusted and mgmt subnets.
 - `mgmt_client`: management client API (FastAPI) for the mgmt segment.
 - `toolbox`: optional netshoot container for troubleshooting.
 - `lab_api`: management API (FastAPI) for logs and optional dig execution.
-- `capture_resolver`: netshoot sidecar that shares the resolver network namespace for packet capture.
-- `capture_authoritative`: netshoot sidecar that shares the child authoritative network namespace for packet capture.
+- Packet capture runs via `tcpdump` inside the resolver and authoritative child containers (triggered by `lab_api`).
 - `anchor_export`: one-shot helper that writes the parent trust anchor to `anchors/test.key`.
 - `react_ui`: React UI (Nginx) that talks to per-client APIs and the lab API.
 
@@ -175,4 +174,3 @@ docker compose restart authoritative_parent
 Notes:
 - The service restarts `authoritative_parent` only when the DS changes.
 - It uses the Docker socket to restart the container.
-

@@ -15,6 +15,12 @@ PARENT_DIR="${ROOT_DIR}/bind9_parent"
 
 case "$MODE" in
   nsec)
+    rm -f "${CHILD_DIR}/zones/db.example.test.signed" \
+      "${CHILD_DIR}/zones/db.example.test.signed.jnl" \
+      "${CHILD_DIR}/zones/db.example.test.internal.signed" \
+      "${CHILD_DIR}/zones/db.example.test.internal.signed.jnl" \
+      "${PARENT_DIR}/zones/db.test.signed" \
+      "${PARENT_DIR}/zones/db.test.signed.jnl" || true
     cp "${CHILD_DIR}/named.inline.conf" "${CHILD_DIR}/named.conf"
     cp "${PARENT_DIR}/named.inline.conf" "${PARENT_DIR}/named.conf"
     echo "Applied inline NSEC mode."

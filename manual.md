@@ -19,6 +19,7 @@ This single Markdown document contains:
 - `dns_client` — trusted test box with `dig`
 - `dns_untrusted` — untrusted test box with `dig`
 - `dns_toolbox` — optional netshoot container for troubleshooting
+- `dns_perf_tools` — optional perf container with `dnsperf` + `resperf`
 
 ### IP plan (example)
 - Authoritative (parent/test): `172.31.0.10`
@@ -213,6 +214,55 @@ dig @127.0.0.1 -p 5301 example.test A
 ```
 **Expected:** works on the host.  
 **Security expectation:** it should NOT be reachable from other machines (bound to `127.0.0.1` only).
+
+---
+
+### Test 7 — dnsperf (throughput + latency, low-rate)
+Prereq: the `perf_tools` container (dnsperf installed).
+```bash
+docker compose up -d perf_tools
+```
+
+Query set (edit to match your goals): `tests/perf/queries.txt`.
+
+Warm-up (very low rate):
+```bash
+docker compose exec perf_tools sh -lc "dnsperf -s 172.32.0.20 -d /work/tests/perf/queries.txt -l 10 -Q 20 -q 200 -T 2 -c 2"
+```
+
+Test run (still low-rate, safe for lab):
+```bash
+docker compose exec perf_tools sh -lc "dnsperf -s 172.32.0.20 -d /work/tests/perf/queries.txt -l 30 -Q 100 -q 1000 -T 2 -c 4"
+```
+
+Optional: test authoritative directly (from `dns_core` network):
+```bash
+docker compose exec perf_tools sh -lc "dnsperf -s 172.31.0.11 -d /work/tests/perf/queries.txt -l 20 -Q 50 -q 500 -T 2 -c 2"
+```
+
+**Expected:** low or zero loss, stable latency stats (avg and percentiles).
+If loss increases or latency spikes, reduce `-Q` (max QPS) and/or `-q` (total queries).
+
+---
+
+### Test 8 — resperf (ramp test + capacity curve)
+`resperf` ramps QPS up to a maximum and reports latency/loss per interval.
+
+Small, safe ramp example (writes plot data to `captures/`):
+```bash
+docker compose exec perf_tools sh -lc "resperf -s 172.32.0.20 -d /work/tests/perf/queries.txt -m 200 -r 15 -c 15 -q 200 -P /work/captures/resperf_plot.txt"
+```
+
+Optional report (requires `resperf-report` + gnuplot):
+```bash
+docker compose exec perf_tools sh -lc "resperf-report /work/captures/resperf_plot.txt > /work/captures/resperf_report.html"
+```
+If `resperf-report` is missing or the report fails, install `gnuplot` inside the container.
+```bash
+docker compose exec perf_tools sh -lc "apt-get update && apt-get install -y gnuplot"
+```
+
+**Expected:** a smooth curve up to your chosen max QPS; keep this low in the lab.
 
 ---
 

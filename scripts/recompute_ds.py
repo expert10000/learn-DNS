@@ -9,13 +9,63 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _parse_state(path: Path) -> dict[str, str]:
+    data: dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            data[key.strip()] = value.strip()
+    except Exception:
+        return {}
+    return data
+
+
+def _parse_state_ts(value: str) -> int:
+    token = value.strip().split()[0]
+    return int(token) if token.isdigit() else -1
+
+
 def find_ksk(keys_dir: Path, zone_name: str) -> tuple[Path, str] | None:
-    pattern = f"K{zone_name}.+013+*.key"
-    for path in sorted(keys_dir.glob(pattern)):
+    key_prefix = f"K{zone_name}.+013+"
+    states = sorted(keys_dir.glob(f"{key_prefix}*.state"))
+    best_state: Path | None = None
+    best_active = -1
+
+    for state_path in states:
+        data = _parse_state(state_path)
+        if data.get("KSK") != "yes":
+            continue
+        if data.get("GoalState") != "omnipresent":
+            continue
+        active_raw = data.get("Active", "")
+        active = _parse_state_ts(active_raw)
+        if active < 0:
+            continue
+        if active > best_active:
+            best_active = active
+            best_state = state_path
+
+    if not best_state and states:
+        best_state = states[0]
+
+    if best_state:
+        key_path = best_state.with_suffix(".key")
+        if key_path.exists():
+            text = key_path.read_text(encoding="utf-8", errors="ignore")
+            if " DNSKEY 257 " in text:
+                return key_path, text
+
+    candidates: list[tuple[Path, str]] = []
+    for path in sorted(keys_dir.glob(f"{key_prefix}*.key")):
         text = path.read_text(encoding="utf-8", errors="ignore")
         if " DNSKEY 257 " in text:
-            return path, text
-    return None
+            candidates.append((path, text))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0].stat().st_mtime, reverse=True)
+    return candidates[0]
 
 
 def compute_ds(dnskey_text: str, owner: str) -> tuple[int, int, str]:

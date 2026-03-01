@@ -1,0 +1,10 @@
+example.test A
+www.example.test A
+example.test AAAA
+www.example.test AAAA
+example.test NS
+example.test SOA
+example.test DNSKEY
+ns-child.test A
+nope1.example.test A
+nope2.example.test A

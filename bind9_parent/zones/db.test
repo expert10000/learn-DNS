@@ -1,6 +1,6 @@
 $TTL 300
 @   IN SOA ns1.test. admin.test. (
-        2026022703 ; serial
+        2026022801 ; serial
         1h         ; refresh
         15m        ; retry
         1w         ; expire
@@ -13,7 +13,7 @@ ns1 IN A   172.31.0.10
 
 ; Delegate example.test to the child authoritative.
 example  IN NS  ns-child.test.
-example  IN DS  2860 13 2 0E1EB24030598AB8D7B5525A7043F270DE67FEBE8E65211506DADBBA1716CE50
+example  IN DS  3984 13 2 5BB8FBCB7C4EDD860A574141A050D575F538D76C8FC96A7D7057191E51F1C70B
 
 ; Authoritative NS name for the child (in parent zone, signed).
 ns-child IN A 172.31.0.11

@@ -5,6 +5,21 @@ type Client = 'trusted' | 'untrusted' | 'mgmt';
 type Backend = 'client' | 'lab_api';
 
 type ResolverKind = 'valid' | 'plain';
+type SectionId =
+  | 'all'
+  | 'overview'
+  | 'topology'
+  | 'dig'
+  | 'output'
+  | 'dnssec'
+  | 'privacy'
+  | 'availability'
+  | 'perf'
+  | 'limits'
+  | 'amplification'
+  | 'controls'
+  | 'configs'
+  | 'capture';
 
 type DigRequest = {
   client: Client;
@@ -31,6 +46,14 @@ type LabDigResponse = {
   stderr: string;
 };
 
+type MaintenanceResponse = {
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
 type OutputView = {
   ok: boolean;
   command: string;
@@ -38,6 +61,7 @@ type OutputView = {
 };
 
 type ConfigGroup = 'authoritative' | 'resolver';
+type ConfigServer = 'child' | 'parent' | 'resolver' | 'plain';
 type PrivacyTab = 'overview' | 'dot' | 'doh' | 'logs';
 
 type ConfigFile = {
@@ -56,6 +80,12 @@ type ConfigFileResponse = {
   size: number;
   truncated: boolean;
   content: string;
+};
+
+type StartupDiagnosticsResponse = {
+  ok: boolean;
+  issues: string[];
+  details: Record<string, string>;
 };
 
 type IndicatorState = {
@@ -116,6 +146,14 @@ type CaptureSummaryResponse = {
   stderr_upstream: string;
 };
 
+type CaptureHealthResponse = {
+  ok: boolean;
+  target: CaptureTarget;
+  running: boolean;
+  pid?: number;
+  detail?: string;
+};
+
 type SigningSwitchRequest = {
   mode: 'nsec' | 'nsec3';
 };
@@ -148,6 +186,328 @@ type PrivacyCheckResponse = {
   detail?: string;
 };
 
+type AvailabilityMetricsResponse = {
+  ok: boolean;
+  totals: {
+    queries: number;
+    cache_hits: number;
+    cache_miss: number;
+    nxdomain: number;
+    servfail: number;
+    ratelimited: number;
+    ip_ratelimited: number;
+  };
+  ratios: {
+    nxdomain: number;
+    servfail: number;
+    cache_hit: number;
+    ratelimited: number;
+    ip_ratelimited: number;
+  };
+  avg_recursion_ms: number;
+  raw: string;
+};
+
+type AvailabilityProbeRequest = {
+  profile: Client;
+  resolver: ResolverKind;
+  name: string;
+  qtype: string;
+  count: number;
+};
+
+type AvailabilityProbeResponse = {
+  ok: boolean;
+  target: string;
+  name: string;
+  qtype: string;
+  count: number;
+  min_ms: number;
+  max_ms: number;
+  avg_ms: number;
+  p50_ms?: number;
+  p95_ms?: number;
+  rcode_counts: Record<string, number>;
+};
+
+type ResolverStatsResponse = {
+  ok: boolean;
+  resolver: ResolverKind;
+  container: string;
+  cpu_pct?: number;
+  mem_bytes?: number;
+  mem_limit_bytes?: number;
+  mem_pct?: number;
+};
+
+type BaselineSummary = {
+  duration_s: number;
+  qps: number;
+  total_queries: number;
+  cache_hit_ratio: number;
+  nxdomain_ratio: number;
+  servfail_ratio: number;
+  p50_ms: number;
+  p95_ms: number;
+  cpu_pct?: number;
+  mem_mb?: number;
+  mem_pct?: number;
+  upstream_qps?: number;
+  upstream_queries?: number;
+  capture_file?: string;
+};
+
+type AvailabilityLoadRequest = {
+  profile: Client;
+  resolver: ResolverKind;
+  name: string;
+  qtype: string;
+  count: number;
+  qps: number;
+};
+
+type AvailabilityLoadResponse = {
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
+type FloodTestRequest = {
+  profile: Client;
+  resolver: ResolverKind;
+  name: string;
+  qtype: string;
+  qps_start: number;
+  qps_end: number;
+  qps_step: number;
+  step_seconds: number;
+  max_outstanding: number;
+  timeout_ms: number;
+  stop_loss_pct: number;
+  stop_p95_ms: number;
+  stop_servfail_pct: number;
+  stop_cpu_pct: number;
+};
+
+type FloodStepResult = {
+  step: number;
+  qps: number;
+  actual_qps: number;
+  duration_s: number;
+  sent: number;
+  responses: number;
+  timeouts: number;
+  loss_pct: number;
+  rcode_counts: Record<string, number>;
+  avg_ms: number;
+  p95_ms: number;
+  max_ms: number;
+  servfail_pct: number;
+  cpu_pct?: number;
+  stop_reason?: string;
+};
+
+type FloodTestResponse = {
+  ok: boolean;
+  target: string;
+  name: string;
+  qtype: string;
+  steps: FloodStepResult[];
+  stopped_early: boolean;
+  stop_reason?: string;
+};
+
+type RrlTestRequest = {
+  name: string;
+  qtype: string;
+  count: number;
+  log_tail: number;
+};
+
+type RrlTestResponse = {
+  ok: boolean;
+  rrl_enabled: boolean;
+  config_excerpt: string;
+  log_excerpt: string;
+  matches: string[];
+};
+
+type AmplificationTestRequest = {
+  profile: Client;
+  resolver: ResolverKind;
+  name: string;
+  qtypes: string[];
+  edns_sizes: number[];
+  count_per_qtype: number;
+  dnssec: boolean;
+  tcp_fallback: boolean;
+};
+
+type AmplificationResult = {
+  edns_size: number;
+  qtype: string;
+  count: number;
+  rcode_counts: Record<string, number>;
+  tc_rate: number;
+  tcp_rate: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  avg_udp_size: number;
+  max_udp_size: number;
+  avg_tcp_size: number;
+  max_tcp_size: number;
+};
+
+type AmplificationTestResponse = {
+  ok: boolean;
+  target: string;
+  name: string;
+  results: AmplificationResult[];
+};
+
+type MixLoadRequest = {
+  profile: Client;
+  resolver: ResolverKind;
+  zone: string;
+  count: number;
+  edns_size: number;
+  dnssec: boolean;
+  tcp_fallback: boolean;
+};
+
+type MixLoadResponse = {
+  ok: boolean;
+  target: string;
+  count: number;
+  edns_size: number;
+  rcode_counts: Record<string, number>;
+  query_mix: Record<string, number>;
+  tc_rate: number;
+  tcp_rate: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  avg_udp_size: number;
+  max_udp_size: number;
+  avg_tcp_size: number;
+  max_tcp_size: number;
+};
+
+type PerfTarget =
+  | 'resolver_valid'
+  | 'resolver_plain'
+  | 'authoritative_parent'
+  | 'authoritative_child';
+
+type DnsperfRequest = {
+  target: PerfTarget;
+  duration_s: number;
+  qps: number;
+  max_queries: number;
+  threads: number;
+  clients: number;
+  queries?: string;
+};
+
+type DnsperfSummary = {
+  queries_sent?: number;
+  queries_completed?: number;
+  queries_lost?: number;
+  qps?: number;
+  avg_latency_ms?: number;
+  min_latency_ms?: number;
+  max_latency_ms?: number;
+};
+
+type DnsperfResponse = {
+  ok: boolean;
+  target: string;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  summary?: DnsperfSummary | null;
+};
+
+type ResperfRequest = {
+  target: PerfTarget;
+  max_qps: number;
+  ramp_qps: number;
+  clients: number;
+  queries_per_step: number;
+  plot_file?: string;
+  queries?: string;
+};
+
+type ResperfResponse = {
+  ok: boolean;
+  target: string;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  plot_file?: string;
+};
+
+type UnboundControls = {
+  ratelimit: number;
+  ip_ratelimit: number;
+  unwanted_reply_threshold: number;
+  serve_expired: boolean;
+  serve_expired_ttl: number;
+  prefetch: boolean;
+  msg_cache_size: string;
+  rrset_cache_size: string;
+  aggressive_nsec: boolean;
+};
+
+type BindControls = {
+  rrl_enabled: boolean;
+  rrl_responses_per_second: number;
+  rrl_window: number;
+  rrl_slip: number;
+  recursion: boolean;
+};
+
+type ControlsStatusResponse = {
+  ok: boolean;
+  unbound: UnboundControls;
+  bind: BindControls;
+};
+
+type NodeHealth = 'up' | 'down' | 'unknown';
+
+type NodeInfo = {
+  name: string;
+  role: string;
+  ip: string;
+  ports: string;
+  health: NodeHealth;
+  tags: string[];
+  meta: string[];
+};
+
+const DEFAULT_UNBOUND_CONTROLS: UnboundControls = {
+  ratelimit: 200,
+  ip_ratelimit: 50,
+  unwanted_reply_threshold: 0,
+  serve_expired: false,
+  serve_expired_ttl: 0,
+  prefetch: true,
+  msg_cache_size: '',
+  rrset_cache_size: '',
+  aggressive_nsec: true,
+};
+
+const DEFAULT_BIND_CONTROLS: BindControls = {
+  rrl_enabled: true,
+  rrl_responses_per_second: 20,
+  rrl_window: 5,
+  rrl_slip: 2,
+  recursion: false,
+};
+
 const DEFAULT_REQUEST: DigRequest = {
   client: 'trusted',
   resolver: 'valid',
@@ -158,12 +518,151 @@ const DEFAULT_REQUEST: DigRequest = {
   short: false,
 };
 
+const DEFAULT_PERF_QUERIES = [
+  'example.test A',
+  'www.example.test A',
+  'example.test AAAA',
+  'www.example.test AAAA',
+  'example.test NS',
+  'example.test SOA',
+  'example.test DNSKEY',
+  'ns-child.test A',
+  'nope1.example.test A',
+  'nope2.example.test A',
+].join('\n');
+
+const TOPOLOGY_NODES: NodeInfo[] = [
+  {
+    name: 'authoritative_parent',
+    role: 'authoritative parent',
+    ip: '172.31.0.10',
+    ports: '53/udp,tcp',
+    health: 'unknown',
+    tags: ['bind9', 'dnssec'],
+    meta: ['image: bind9:9.18', 'network: dns_core', 'zone: test.'],
+  },
+  {
+    name: 'authoritative_child',
+    role: 'authoritative child',
+    ip: '172.31.0.11',
+    ports: '53/udp,tcp',
+    health: 'unknown',
+    tags: ['bind9', 'dnssec'],
+    meta: ['image: bind9:9.18', 'network: dns_core', 'zone: example.test.'],
+  },
+  {
+    name: 'resolver',
+    role: 'validating resolver',
+    ip: '172.32.0.20',
+    ports: '53/udp,tcp (host 5300), 853/tcp (DoT)',
+    health: 'unknown',
+    tags: ['unbound', 'validator'],
+    meta: ['image: mvance/unbound:1.20.0', 'network: client_net', 'trust: test.'],
+  },
+  {
+    name: 'resolver_plain',
+    role: 'non-validating resolver',
+    ip: '172.32.0.21',
+    ports: '53/udp,tcp (host 5301)',
+    health: 'unknown',
+    tags: ['unbound', 'plain'],
+    meta: ['image: mvance/unbound:1.20.0', 'network: client_net', 'no trust anchor'],
+  },
+  {
+    name: 'dot_proxy',
+    role: 'DNS-over-TLS proxy',
+    ip: '172.30.0.81',
+    ports: '853/tcp (host 853)',
+    health: 'unknown',
+    tags: ['dot', 'tls'],
+    meta: ['network: mgmt_net', 'upstream: 172.30.0.20:53'],
+  },
+  {
+    name: 'doh_proxy',
+    role: 'DNS-over-HTTPS proxy',
+    ip: '172.30.0.80',
+    ports: '443/tcp (host 8443)',
+    health: 'unknown',
+    tags: ['doh', 'https'],
+    meta: ['network: mgmt_net', 'path: /dns-query'],
+  },
+  {
+    name: 'lab_api',
+    role: 'management API',
+    ip: '172.30.0.90',
+    ports: '8000/tcp (host 127.0.0.1:8000)',
+    health: 'unknown',
+    tags: ['api', 'control'],
+    meta: ['network: mgmt_net', 'rate limit: 120/min'],
+  },
+  {
+    name: 'client',
+    role: 'trusted client API',
+    ip: '172.32.0.50',
+    ports: 'HTTP only',
+    health: 'unknown',
+    tags: ['client', 'trusted'],
+    meta: ['network: client_net', 'profile: trusted'],
+  },
+  {
+    name: 'untrusted',
+    role: 'untrusted client API',
+    ip: '172.33.0.50',
+    ports: 'HTTP only',
+    health: 'unknown',
+    tags: ['client', 'untrusted'],
+    meta: ['network: untrusted_net', 'profile: untrusted'],
+  },
+];
+
+const MVP_UI_NOTES = [
+  {
+    title: 'Nodes / Topology',
+    items: [
+      'Role: authoritative, resolver, client, capture, signer',
+      'Lab IPs + ports (53/udp,tcp; 8000; 5173)',
+      'Health (up/down + uptime)',
+      'Metadata: image tag, container name, networks',
+    ],
+  },
+  {
+    title: 'Configs',
+    items: [
+      'unbound.conf and unbound.plain.conf',
+      'named.conf + zone file (authoritative)',
+      'DNSSEC ON/OFF, aggressive NSEC state',
+      'Read-only view with syntax highlight',
+      'Export config bundle',
+    ],
+  },
+];
+
+const SECTION_TABS: { id: SectionId; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'overview', label: 'Overview' },
+  { id: 'topology', label: 'Topology' },
+  { id: 'dig', label: 'Dig' },
+  { id: 'output', label: 'Output' },
+  { id: 'dnssec', label: 'DNSSEC' },
+  { id: 'privacy', label: 'Privacy' },
+  { id: 'availability', label: 'Availability' },
+  { id: 'perf', label: 'Perf' },
+  { id: 'limits', label: 'Service Limits' },
+  { id: 'amplification', label: 'Amplification' },
+  { id: 'controls', label: 'Controls' },
+  { id: 'configs', label: 'Configs' },
+  { id: 'capture', label: 'Capture' },
+];
+
 const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/+$/, '');
 const LAB_API_BASE = (import.meta.env.VITE_LAB_API_BASE || '/lab-api').replace(
   /\/+$/,
   ''
 );
 const LAB_API_KEY = import.meta.env.VITE_LAB_API_KEY || '';
+const CLIENT_API_KEY = import.meta.env.VITE_CLIENT_API_KEY || '';
+const PRIVACY_EXISTING_NAME = 'www.example.test';
+const PRIVACY_NONEXISTENT_NAME = 'nope1.example.test';
 
 async function postJson<T>(
   path: string,
@@ -215,6 +714,48 @@ function formatBytes(bytes: number): string {
   return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function formatPercent(value?: number): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return 'n/a';
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatKeyValues(values: Record<string, number> | undefined): string {
+  if (!values) {
+    return '—';
+  }
+  const entries = Object.entries(values);
+  if (entries.length === 0) {
+    return '—';
+  }
+  return entries.map(([key, val]) => `${key}:${val}`).join(' ');
+}
+
+function readConfigValue(content: string, key: string): string | null {
+  const regex = new RegExp(`^\\s*${key}\\s*:\\s*(.+)$`, 'i');
+  for (const line of content.split('\n')) {
+    const match = line.match(regex);
+    if (match) {
+      return match[1].trim();
+    }
+  }
+  return null;
+}
+
+function extractBlock(content: string, keyword: string): string {
+  const regex = new RegExp(`\\n\\s*${keyword}\\s*\\{[\\s\\S]*?\\};`, 'i');
+  const match = content.match(regex);
+  return match ? match[0].trim() : '';
+}
+
+function ratioClass(value: number | undefined, threshold: number): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return 'unknown';
+  }
+  return value >= threshold ? 'disabled' : 'enabled';
+}
+
 function parseDigRcode(output: string): string | undefined {
   for (const line of output.split('\n')) {
     if (!line.includes('status:')) {
@@ -256,6 +797,13 @@ function formatStatusLabel(rcode?: string, ad?: boolean): string {
   return `${rcode}${ad === undefined ? '' : ` (AD=${ad ? 'yes' : 'no'})`}`;
 }
 
+function formatDemoStatus(rcode?: string, ad?: boolean): string {
+  if (rcode === 'NXDOMAIN') {
+    return 'NXDOMAIN (expected)';
+  }
+  return formatStatusLabel(rcode, ad);
+}
+
 function formatIndicator(value?: boolean): string {
   if (value === undefined) {
     return 'unknown';
@@ -263,11 +811,50 @@ function formatIndicator(value?: boolean): string {
   return value ? 'enabled' : 'not detected';
 }
 
+function configLineClass(line: string): string {
+  const trimmed = line.trim();
+  if (!trimmed) return 'config-line';
+  if (
+    trimmed.startsWith('#') ||
+    trimmed.startsWith(';') ||
+    trimmed.startsWith('//')
+  ) {
+    return 'config-line comment';
+  }
+  if (
+    /^(options|server|zone|view|include|local-zone|local-data)\b/i.test(
+      trimmed
+    )
+  ) {
+    return 'config-line keyword';
+  }
+  if (
+    /^(ratelimit|ip-ratelimit|aggressive-nsec|qname-minimisation)\b/i.test(
+      trimmed
+    )
+  ) {
+    return 'config-line setting';
+  }
+  return 'config-line';
+}
+
 function indicatorClass(value?: boolean): string {
   if (value === undefined) {
     return 'unknown';
   }
   return value ? 'enabled' : 'disabled';
+}
+
+function healthClass(health: NodeHealth): string {
+  if (health === 'up') return 'up';
+  if (health === 'down') return 'down';
+  return 'unknown';
+}
+
+function healthLabel(health: NodeHealth): string {
+  if (health === 'up') return 'Up';
+  if (health === 'down') return 'Down';
+  return 'Unknown';
 }
 
 function parseNsec3FromZone(content: string, sourceLabel: string) {
@@ -390,6 +977,7 @@ function pickLabelBetween(owner: string, next: string, zone: string) {
 export default function App() {
   const [req, setReq] = useState<DigRequest>(DEFAULT_REQUEST);
   const [backend, setBackend] = useState<Backend>('client');
+  const [activeSection, setActiveSection] = useState<SectionId>('all');
   const [output, setOutput] = useState<OutputView | null>(null);
   const [status, setStatus] = useState<string>('');
   const outputRef = useRef<HTMLDivElement | null>(null);
@@ -399,6 +987,8 @@ export default function App() {
   const [configContent, setConfigContent] = useState<string>('');
   const [configStatus, setConfigStatus] = useState<string>('');
   const [configGroup, setConfigGroup] = useState<ConfigGroup>('authoritative');
+  const [configServer, setConfigServer] = useState<ConfigServer>('child');
+  const [configSearch, setConfigSearch] = useState('');
   const [privacyTab, setPrivacyTab] = useState<PrivacyTab>('overview');
   const [captureTarget, setCaptureTarget] =
     useState<CaptureTarget>('resolver');
@@ -414,6 +1004,7 @@ export default function App() {
   const [signingBusy, setSigningBusy] = useState(false);
   const [signingStatus, setSigningStatus] = useState('');
   const [signingOutput, setSigningOutput] = useState('');
+  const [signingSteps, setSigningSteps] = useState<SigningStep[]>([]);
   const [proofBusy, setProofBusy] = useState(false);
   const [proofStatus, setProofStatus] = useState('');
   const [proofOutput, setProofOutput] = useState('');
@@ -423,10 +1014,117 @@ export default function App() {
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [privacyStatus, setPrivacyStatus] = useState('');
   const [privacyOutput, setPrivacyOutput] = useState('');
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+  const [availabilityStatus, setAvailabilityStatus] = useState('');
+  const [availabilityOutput, setAvailabilityOutput] = useState('');
+  const [availabilityMetrics, setAvailabilityMetrics] =
+    useState<AvailabilityMetricsResponse | null>(null);
+  const [availabilityProbe, setAvailabilityProbe] =
+    useState<AvailabilityProbeResponse | null>(null);
+  const [availabilityUpdatedAt, setAvailabilityUpdatedAt] = useState('');
+  const [perfTarget, setPerfTarget] = useState<PerfTarget>('resolver_valid');
+  const [perfQueries, setPerfQueries] = useState(DEFAULT_PERF_QUERIES);
+  const [dnsperfBusy, setDnsperfBusy] = useState(false);
+  const [dnsperfStatus, setDnsperfStatus] = useState('');
+  const [dnsperfOutput, setDnsperfOutput] = useState('');
+  const [dnsperfSummary, setDnsperfSummary] = useState<DnsperfSummary | null>(
+    null
+  );
+  const [dnsperfDuration, setDnsperfDuration] = useState(15);
+  const [dnsperfQps, setDnsperfQps] = useState(20);
+  const [dnsperfMaxQueries, setDnsperfMaxQueries] = useState(200);
+  const [dnsperfThreads, setDnsperfThreads] = useState(1);
+  const [dnsperfClients, setDnsperfClients] = useState(1);
+  const [resperfBusy, setResperfBusy] = useState(false);
+  const [resperfStatus, setResperfStatus] = useState('');
+  const [resperfOutput, setResperfOutput] = useState('');
+  const [resperfPlotFile, setResperfPlotFile] = useState('');
+  const [resperfMaxQps, setResperfMaxQps] = useState(100);
+  const [resperfRampQps, setResperfRampQps] = useState(10);
+  const [resperfClients, setResperfClients] = useState(5);
+  const [resperfQueriesPerStep, setResperfQueriesPerStep] = useState(100);
+  const [resperfPlotName, setResperfPlotName] = useState('resperf_plot.txt');
+  const [loadCount, setLoadCount] = useState(200);
+  const [loadQps, setLoadQps] = useState(20);
+  const [probeCount, setProbeCount] = useState(5);
+  const [floodBusy, setFloodBusy] = useState(false);
+  const [floodStatus, setFloodStatus] = useState('');
+  const [floodSummary, setFloodSummary] = useState('');
+  const [floodResults, setFloodResults] = useState<FloodStepResult[]>([]);
+  const [floodStartQps, setFloodStartQps] = useState(10);
+  const [floodEndQps, setFloodEndQps] = useState(100);
+  const [floodStepQps, setFloodStepQps] = useState(10);
+  const [floodStepSeconds, setFloodStepSeconds] = useState(30);
+  const [floodOutstanding, setFloodOutstanding] = useState(200);
+  const [floodTimeoutMs, setFloodTimeoutMs] = useState(1000);
+  const [floodStopLoss, setFloodStopLoss] = useState(2);
+  const [floodStopP95, setFloodStopP95] = useState(200);
+  const [floodStopServfail, setFloodStopServfail] = useState(2);
+  const [floodStopCpu, setFloodStopCpu] = useState(85);
+  const [baselineBusy, setBaselineBusy] = useState(false);
+  const [baselineStatus, setBaselineStatus] = useState('');
+  const [baselineDuration, setBaselineDuration] = useState(60);
+  const [baselineProbeCount, setBaselineProbeCount] = useState(20);
+  const [baselineSummary, setBaselineSummary] =
+    useState<BaselineSummary | null>(null);
+  const [baselineCaptureFile, setBaselineCaptureFile] = useState('');
+  const [warmupBusy, setWarmupBusy] = useState(false);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
+  const [limitsBusy, setLimitsBusy] = useState(false);
+  const [limitsStatus, setLimitsStatus] = useState('');
+  const [unboundLimitLines, setUnboundLimitLines] = useState<string[]>([]);
+  const [bindRrlBlock, setBindRrlBlock] = useState('');
+  const [bindRrlEnabled, setBindRrlEnabled] = useState<boolean | null>(null);
+  const [rateLimitDelta, setRateLimitDelta] = useState<{
+    ratelimited: number;
+    ip_ratelimited: number;
+    total: number;
+  } | null>(null);
+  const [rateLimitAfter, setRateLimitAfter] =
+    useState<AvailabilityMetricsResponse | null>(null);
+  const [rrlStatus, setRrlStatus] = useState('');
+  const [rrlResult, setRrlResult] = useState<RrlTestResponse | null>(null);
+  const [rrlCount, setRrlCount] = useState(300);
+  const [ampBusy, setAmpBusy] = useState(false);
+  const [ampStatus, setAmpStatus] = useState('');
+  const [ampResults, setAmpResults] = useState<AmplificationResult[]>([]);
+  const [ampCount, setAmpCount] = useState(10);
+  const [ampDnssec, setAmpDnssec] = useState(true);
+  const [ampTcpFallback, setAmpTcpFallback] = useState(true);
+  const [ampQtypes, setAmpQtypes] = useState<string[]>([
+    'DNSKEY',
+    'ANY',
+    'TXT',
+    'RRSIG',
+  ]);
+  const [ampEdnsSizes, setAmpEdnsSizes] = useState<number[]>([1232, 4096]);
+  const [ampName, setAmpName] = useState('example.test');
+  const [mixBusy, setMixBusy] = useState(false);
+  const [mixStatus, setMixStatus] = useState('');
+  const [mixResult, setMixResult] = useState<MixLoadResponse | null>(null);
+  const [mixCount, setMixCount] = useState(200);
+  const [mixEdns, setMixEdns] = useState(1232);
+  const [mixDnssec, setMixDnssec] = useState(true);
+  const [mixTcpFallback, setMixTcpFallback] = useState(true);
+  const [mixZone, setMixZone] = useState('example.test');
+  const [controlsBusy, setControlsBusy] = useState(false);
+  const [controlsStatus, setControlsStatus] = useState('');
+  const [unboundCtl, setUnboundCtl] = useState<UnboundControls>(
+    DEFAULT_UNBOUND_CONTROLS
+  );
+  const [bindCtl, setBindCtl] = useState<BindControls>(DEFAULT_BIND_CONTROLS);
   const [indicators, setIndicators] = useState<IndicatorState>({
     loading: false,
     message: 'Not loaded.',
   });
+
+  const scrollToConfigs = () => {
+    const target = document.getElementById('configs');
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      window.location.hash = 'configs';
+    }
+  };
 
   const clientBase = `${API_BASE}/${req.client}`;
   const missingLabKey = useMemo(() => LAB_API_KEY.trim().length === 0, []);
@@ -434,8 +1132,37 @@ export default function App() {
   if (LAB_API_KEY.trim()) {
     labHeaders['x-api-key'] = LAB_API_KEY;
   }
-  const groupPrefix = configGroup === 'authoritative' ? 'bind/' : 'unbound/';
-  const groupedFiles = configFiles.filter((f) => f.path.startsWith(groupPrefix));
+  const clientHeaders: Record<string, string> = {};
+  if (CLIENT_API_KEY.trim()) {
+    clientHeaders['x-api-key'] = CLIENT_API_KEY;
+  }
+  const groupPrefixes =
+    configGroup === 'authoritative' ? ['bind/', 'bind_parent/'] : ['unbound/'];
+  const groupedFiles = configFiles.filter((f) =>
+    groupPrefixes.some((prefix) => f.path.startsWith(prefix))
+  );
+  const serverFilteredFiles = groupedFiles.filter((f) => {
+    if (configGroup === 'authoritative') {
+      return configServer === 'parent'
+        ? f.path.startsWith('bind_parent/')
+        : f.path.startsWith('bind/');
+    }
+    if (configServer === 'plain') {
+      return (
+        f.path.startsWith('unbound/') &&
+        (f.path.includes('plain') || f.path.endsWith('root.hints'))
+      );
+    }
+    return (
+      f.path.startsWith('unbound/') &&
+      (!f.path.includes('plain') || f.path.endsWith('root.hints'))
+    );
+  });
+  const visibleConfigFiles = serverFilteredFiles.filter((f) =>
+    configSearch.trim()
+      ? f.path.toLowerCase().includes(configSearch.trim().toLowerCase())
+      : true
+  );
   const resolverIpByClient: Record<ResolverKind, Record<Client, string>> = {
     valid: {
       trusted: '172.32.0.20',
@@ -449,15 +1176,69 @@ export default function App() {
     },
   };
   const resolverLabel = `${req.resolver} (${resolverIpByClient[req.resolver][req.client]})`;
+  const perfTargetOptions: { value: PerfTarget; label: string }[] = [
+    { value: 'resolver_valid', label: 'Resolver (validating) — 172.32.0.20' },
+    { value: 'resolver_plain', label: 'Resolver (plain) — 172.32.0.21' },
+    { value: 'authoritative_parent', label: 'Authoritative parent — 172.31.0.10' },
+    { value: 'authoritative_child', label: 'Authoritative child — 172.31.0.11' },
+  ];
+  const nxdomainRatio = availabilityMetrics?.ratios.nxdomain;
+  const servfailRatio = availabilityMetrics?.ratios.servfail;
+  const cacheHitRatio = availabilityMetrics?.ratios.cache_hit;
+  const ratelimitRatio = availabilityMetrics?.ratios.ratelimited;
+  const ipRatelimitRatio = availabilityMetrics?.ratios.ip_ratelimited;
+  const selectedConfig = configFiles.find((f) => f.path === configPath);
+  const sortedAmpResults = useMemo(
+    () =>
+      [...ampResults].sort(
+        (a, b) =>
+          a.edns_size - b.edns_size || a.qtype.localeCompare(b.qtype)
+      ),
+    [ampResults]
+  );
 
-  useEffect(() => {
-    if (groupedFiles.length === 0) {
+  const isSectionVisible = (id: SectionId) =>
+    activeSection === 'all' || activeSection === id;
+
+  const selectSection = (id: SectionId) => {
+    setActiveSection(id);
+    if (id === 'all') {
+      window.history.replaceState(null, '', window.location.pathname);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    if (!configPath || !configPath.startsWith(groupPrefix)) {
-      setConfigPath(groupedFiles[0].path);
+    const target = document.getElementById(id);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [groupPrefix, groupedFiles, configPath]);
+    window.location.hash = id;
+  };
+
+  useEffect(() => {
+    const hash = window.location.hash.replace('#', '');
+    if (hash && SECTION_TABS.some((tab) => tab.id === hash)) {
+      setActiveSection(hash as SectionId);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (configGroup === 'authoritative') {
+      if (configServer !== 'child' && configServer !== 'parent') {
+        setConfigServer('child');
+      }
+    } else if (configServer !== 'resolver' && configServer !== 'plain') {
+      setConfigServer('resolver');
+    }
+  }, [configGroup, configServer]);
+
+  useEffect(() => {
+    if (visibleConfigFiles.length === 0) {
+      return;
+    }
+    if (!configPath || !visibleConfigFiles.some((f) => f.path === configPath)) {
+      setConfigPath(visibleConfigFiles[0].path);
+    }
+  }, [visibleConfigFiles, configPath]);
 
   const runDig = async () => {
     await runDigWithRequest(req, 'Running dig...');
@@ -476,7 +1257,8 @@ export default function App() {
       const server = resolverIpByClient[resolver][client];
       const result = await postJson<ClientDigResponse>(
         `${API_BASE}/${client}/dig`,
-        { ...body, server }
+        { ...body, server },
+        clientHeaders
       );
       const parsedRcode = parseDigRcode(result.output);
       const parsedAd = parseDigAd(result.output);
@@ -519,8 +1301,12 @@ export default function App() {
         result.ok ? formatStatusLabel(result.rcode, result.ad) : 'Completed with errors'
       );
     } catch (err) {
-      setStatus((err as Error).message);
       setOutput(null);
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setStatus,
+        (value) => setOutput({ ok: false, command: 'diagnostics', text: value })
+      );
     } finally {
       if (outputRef.current) {
         outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -628,6 +1414,7 @@ export default function App() {
       const first = await executeDigRequest(firstReq);
       const second = await executeDigRequest(secondReq);
       const combinedText = [
+        '# Aggressive NSEC proof (expected NXDOMAIN)',
         `# Query 1: ${firstReq.name}`,
         first.output.command,
         '',
@@ -644,10 +1431,10 @@ export default function App() {
         text: combinedText,
       });
       setStatus(
-        `Aggressive NSEC demo completed. Q1: ${formatStatusLabel(
+        `Aggressive NSEC demo completed. Q1: ${formatDemoStatus(
           first.rcode,
           first.ad
-        )}, Q2: ${formatStatusLabel(second.rcode, second.ad)}`
+        )}, Q2: ${formatDemoStatus(second.rcode, second.ad)}`
       );
     } catch (err) {
       setStatus((err as Error).message);
@@ -747,12 +1534,28 @@ export default function App() {
           `${LAB_API_BASE}/capture/summary?file=${encodeURIComponent(file)}`,
           labHeaders
         );
+        const warningLines: string[] = [];
+        if (summary.total_packets === 0) {
+          warningLines.push(
+            'WARNING: capture empty (0 packets). Likely cache hit or capture failed.'
+          );
+        } else if (summary.upstream_queries === 0) {
+          warningLines.push(
+            'WARNING: no resolver -> authoritative traffic captured (cache hit likely).'
+          );
+        }
         summaryText = [
           '# Capture summary',
           `file: ${summary.file}`,
           `total DNS packets: ${summary.total_packets}`,
           `upstream queries (resolver -> authoritative): ${summary.upstream_queries}`,
+          ...(warningLines.length ? ['', ...warningLines] : []),
         ].join('\n');
+        if (warningLines.length) {
+          setProofStatus(
+            'Capture empty. Restart resolver (cold cache) and rerun Demo + Proof.'
+          );
+        }
       }
 
       const combinedText = [
@@ -772,10 +1575,193 @@ export default function App() {
       setProofOutput(combinedText);
       setProofStatus('Aggressive NSEC proof completed.');
     } catch (err) {
-      setProofStatus((err as Error).message);
       setProofOutput('');
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setProofStatus,
+        setProofOutput
+      );
     } finally {
       setProofBusy(false);
+    }
+  };
+
+  const runAggressiveNsecProofCold = async () => {
+    if (missingLabKey) {
+      setProofStatus('Missing Lab API key.');
+      return;
+    }
+
+    const zone = 'example.test';
+    const base: DigRequest = {
+      ...req,
+      client: 'trusted',
+      resolver: 'valid',
+      qtype: 'A',
+      dnssec: true,
+      trace: false,
+      short: false,
+    };
+    const firstReq: DigRequest = {
+      ...base,
+      name: `nope1-${Math.random().toString(36).slice(2, 7)}.${zone}`,
+    };
+    let secondReq: DigRequest = {
+      ...base,
+      name: `nope2-${Math.random().toString(36).slice(2, 7)}.${zone}`,
+    };
+
+    setProofBusy(true);
+    setProofStatus('Cold run: restarting resolver...');
+    setProofOutput('');
+    setProofCaptureFile('');
+
+    try {
+      await postJson<LabDigResponse>(
+        `${LAB_API_BASE}/resolver/restart`,
+        {},
+        labHeaders
+      );
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+      setProofStatus('Cold run: starting authoritative capture...');
+      const start = await postJson<CaptureStartResponse>(
+        `${LAB_API_BASE}/capture/start`,
+        { target: 'authoritative', filter: 'dns' },
+        labHeaders
+      );
+      setProofCaptureFile(start.file);
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const health = await getJson<CaptureHealthResponse>(
+        `${LAB_API_BASE}/capture/health?target=authoritative`,
+        labHeaders
+      );
+      if (!health.running) {
+        setProofStatus('Capture did not start. Check capture container.');
+        setProofOutput(health.detail || 'Capture health check failed.');
+        await postJson<CaptureStopResponse>(
+          `${LAB_API_BASE}/capture/stop`,
+          { target: 'authoritative' },
+          labHeaders
+        );
+        return;
+      }
+
+      setProofStatus('Cold run: running aggressive NSEC demo...');
+      const first = await executeLabDig(firstReq);
+      const interval = parseNsecInterval(first.output.text);
+      if (interval) {
+        const picked = pickLabelBetween(interval.owner, interval.next, zone);
+        if (picked) {
+          secondReq = { ...base, name: picked };
+        }
+      }
+      const second = await executeLabDig(secondReq);
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      setProofStatus('Cold run: stopping capture...');
+      const stopped = await postJson<CaptureStopResponse>(
+        `${LAB_API_BASE}/capture/stop`,
+        { target: 'authoritative' },
+        labHeaders
+      );
+
+      const file = stopped.file || start.file;
+      setProofCaptureFile(file || '');
+
+      let summaryText = 'No capture summary.';
+      if (file) {
+        const summary = await getJson<CaptureSummaryResponse>(
+          `${LAB_API_BASE}/capture/summary?file=${encodeURIComponent(file)}`,
+          labHeaders
+        );
+        const warningLines: string[] = [];
+        if (summary.total_packets === 0) {
+          warningLines.push(
+            'WARNING: capture empty (0 packets). Capture likely missed or tcpdump failed.'
+          );
+        } else if (summary.upstream_queries === 0) {
+          warningLines.push(
+            'WARNING: no resolver -> authoritative traffic captured (cache hit likely).'
+          );
+        }
+        summaryText = [
+          '# Capture summary',
+          `file: ${summary.file}`,
+          `total DNS packets: ${summary.total_packets}`,
+          `upstream queries (resolver -> authoritative): ${summary.upstream_queries}`,
+          ...(warningLines.length ? ['', ...warningLines] : []),
+        ].join('\n');
+        if (warningLines.length) {
+          setProofStatus(
+            'Cold run finished, but capture is empty. Try again or check capture target.'
+          );
+        }
+      }
+
+      const combinedText = [
+        '# Aggressive NSEC proof (expected NXDOMAIN)',
+        `# Query 1: ${firstReq.name}`,
+        first.output.command,
+        '',
+        first.output.text,
+        '',
+        `# Query 2: ${secondReq.name}`,
+        second.output.command,
+        '',
+        second.output.text,
+        '',
+        summaryText,
+      ].join('\n');
+
+      setProofOutput(combinedText);
+      if (!summaryText.includes('WARNING')) {
+        setProofStatus('Cold run completed.');
+      }
+    } catch (err) {
+      setProofOutput('');
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setProofStatus,
+        setProofOutput
+      );
+    } finally {
+      setProofBusy(false);
+    }
+  };
+
+  const clearAuthoritativeSigned = async () => {
+    if (missingLabKey) {
+      setSigningStatus('Missing Lab API key.');
+      return;
+    }
+    setSigningBusy(true);
+    setSigningStatus('Clearing authoritative signed files and restarting...');
+    try {
+      setSigningSteps([]);
+      const result = await postJson<MaintenanceResponse>(
+        `${LAB_API_BASE}/maintenance/authoritative/clear-signed`,
+        {},
+        labHeaders
+      );
+      const text = `${result.command}\n\n${result.stdout}${
+        result.stderr ? `\n${result.stderr}` : ''
+      }`.trim();
+      setSigningOutput(text || 'Maintenance completed.');
+      setSigningStatus(
+        result.ok
+          ? 'Authoritative signed files cleared. Parent + child restarted.'
+          : 'Maintenance failed.'
+      );
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setSigningStatus,
+        setSigningOutput
+      );
+    } finally {
+      setSigningBusy(false);
     }
   };
 
@@ -794,7 +1780,7 @@ export default function App() {
           ok: boolean;
           profile: string;
           default_dns_server: string;
-        }>(`${clientBase}/health`);
+        }>(`${clientBase}/health`, clientHeaders);
         setStatus(
           result.ok
             ? `Client API healthy (${result.profile} via ${
@@ -828,8 +1814,12 @@ export default function App() {
       setOutput({ ok: result.ok, command: result.command, text });
       setStatus(result.ok ? 'Logs fetched' : 'Log fetch failed');
     } catch (err) {
-      setStatus((err as Error).message);
       setOutput(null);
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setStatus,
+        (value) => setOutput({ ok: false, command: 'diagnostics', text: value })
+      );
     } finally {
       setIsBusy(false);
     }
@@ -844,15 +1834,12 @@ export default function App() {
         labHeaders
       );
       setConfigFiles(result.files);
-      const firstInGroup = result.files.find((f) =>
-        f.path.startsWith(groupPrefix)
-      );
-      if (firstInGroup) {
-        setConfigPath(firstInGroup.path);
-      }
       setConfigStatus(`Loaded ${result.files.length} files.`);
     } catch (err) {
-      setConfigStatus((err as Error).message);
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setConfigStatus
+      );
     } finally {
       setIsBusy(false);
     }
@@ -877,10 +1864,70 @@ export default function App() {
         }`
       );
     } catch (err) {
-      setConfigStatus((err as Error).message);
       setConfigContent('');
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setConfigStatus
+      );
     } finally {
       setIsBusy(false);
+    }
+  };
+
+  const exportConfigBundle = () => {
+    if (!configPath || !configContent) {
+      setConfigStatus('Load a config file before exporting.');
+      return;
+    }
+    const safeName = configPath.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+    const payload = {
+      path: configPath,
+      size: configContent.length,
+      exported_at: new Date().toISOString(),
+      content: configContent,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `config-bundle-${safeName || 'config'}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    setConfigStatus(`Exported bundle for ${configPath}.`);
+  };
+
+  const maybeAttachStartupDiagnostics = async (
+    baseMessage: string,
+    setStatusMessage: (value: string) => void,
+    setOutputMessage?: (value: string) => void
+  ) => {
+    setStatusMessage(baseMessage);
+    if (missingLabKey) {
+      return;
+    }
+    if (!/HTTP 5\d{2}/.test(baseMessage) && !baseMessage.toLowerCase().includes('timeout')) {
+      return;
+    }
+    try {
+      const diag = await getJson<StartupDiagnosticsResponse>(
+        `${LAB_API_BASE}/diagnostics/startup`,
+        labHeaders
+      );
+      if (diag.issues && diag.issues.length > 0) {
+        setStatusMessage(`${baseMessage} • ${diag.issues[0]}`);
+        if (setOutputMessage) {
+          const lines = ['Startup diagnostics:', ...diag.issues];
+          const excerpt = diag.details.bind_parent_excerpt;
+          if (excerpt) {
+            lines.push('', 'bind_parent log excerpt:', excerpt);
+          }
+          setOutputMessage(lines.join('\n'));
+        }
+      }
+    } catch {
+      // ignore diagnostics errors
     }
   };
 
@@ -1069,29 +2116,59 @@ export default function App() {
     setSigningBusy(true);
     setSigningStatus(`Switching to ${mode.toUpperCase()}...`);
     setSigningOutput('');
+    setSigningSteps([]);
     try {
       const result = await postJson<SigningSwitchResponse>(
         `${LAB_API_BASE}/signing/switch`,
         { mode } satisfies SigningSwitchRequest,
         labHeaders
       );
+      setSigningSteps(result.steps);
       const combined = result.steps
-        .map((step) => {
+        .map((step, index) => {
           const stdout = step.stdout?.trim();
           const stderr = step.stderr?.trim();
           const details = [stdout, stderr].filter(Boolean).join('\n');
-          return [`# ${step.step}`, step.command, details].filter(Boolean).join('\n');
+          const header = `# ${index + 1}. ${step.step} (${step.ok ? 'OK' : 'FAIL'}, exit ${step.exit_code})`;
+          return [header, step.command, details].filter(Boolean).join('\n');
         })
         .join('\n\n');
-      setSigningOutput(combined || 'No output.');
-      setSigningStatus(
-        result.ok
-          ? `Switched to ${mode.toUpperCase()}`
-          : `Switch failed (mode ${mode.toUpperCase()})`
-      );
+      let combinedOutput = combined || 'No output.';
+      if (mode === 'nsec' && result.ok) {
+        setSigningStatus('Clearing signed files for inline mode...');
+        const maintenance = await postJson<MaintenanceResponse>(
+          `${LAB_API_BASE}/maintenance/authoritative/clear-signed`,
+          {},
+          labHeaders
+        );
+        const maintenanceText = `${maintenance.command}\n\n${maintenance.stdout}${
+          maintenance.stderr ? `\n${maintenance.stderr}` : ''
+        }`.trim();
+        combinedOutput = [
+          combinedOutput,
+          '',
+          '# Clear signed files',
+          maintenanceText || 'Maintenance completed.',
+        ]
+          .filter(Boolean)
+          .join('\n');
+        setSigningStatus(
+          maintenance.ok
+            ? 'Switched to NSEC and cleared signed files.'
+            : 'Switched to NSEC but cleanup failed.'
+        );
+      } else {
+        setSigningStatus(
+          result.ok
+            ? `Switched to ${mode.toUpperCase()}`
+            : `Switch failed (mode ${mode.toUpperCase()})`
+        );
+      }
+      setSigningOutput(combinedOutput);
       await loadIndicators();
     } catch (err) {
       setSigningStatus((err as Error).message);
+      setSigningSteps([]);
     } finally {
       setSigningBusy(false);
     }
@@ -1167,23 +2244,770 @@ export default function App() {
         );
       }
     } catch (err) {
-      setPrivacyStatus((err as Error).message);
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setPrivacyStatus,
+        setPrivacyOutput
+      );
     } finally {
       setPrivacyBusy(false);
     }
   };
 
+  const setPrivacyName = (name: string) => {
+    setReq((prev) => ({ ...prev, name, qtype: 'A' }));
+    setPrivacyStatus(`Privacy query set to ${name}.`);
+    setPrivacyOutput('');
+  };
+
+  const fetchAvailabilityMetrics = async () => {
+    if (missingLabKey) {
+      setAvailabilityStatus('Missing Lab API key.');
+      return;
+    }
+    setAvailabilityBusy(true);
+    setAvailabilityStatus('Fetching resolver stats...');
+    try {
+      const result = await getJson<AvailabilityMetricsResponse>(
+        `${LAB_API_BASE}/availability/metrics`,
+        labHeaders
+      );
+      setAvailabilityMetrics(result);
+      setAvailabilityUpdatedAt(new Date().toLocaleTimeString());
+      setAvailabilityStatus('Metrics loaded.');
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setAvailabilityStatus,
+        setAvailabilityOutput
+      );
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  };
+
+  const runAvailabilityProbe = async () => {
+    if (missingLabKey) {
+      setAvailabilityStatus('Missing Lab API key.');
+      return;
+    }
+    setAvailabilityBusy(true);
+    setAvailabilityStatus('Running latency probe...');
+    try {
+      const body: AvailabilityProbeRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: req.name,
+        qtype: req.qtype,
+        count: probeCount,
+      };
+      const result = await postJson<AvailabilityProbeResponse>(
+        `${LAB_API_BASE}/availability/probe`,
+        body,
+        labHeaders
+      );
+      setAvailabilityProbe(result);
+      setAvailabilityUpdatedAt(new Date().toLocaleTimeString());
+      setAvailabilityStatus(
+        `Probe completed: avg ${result.avg_ms} ms (${result.count} queries).`
+      );
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setAvailabilityStatus,
+        setAvailabilityOutput
+      );
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  };
+
+  const runAvailabilityLoad = async () => {
+    if (missingLabKey) {
+      setAvailabilityStatus('Missing Lab API key.');
+      return;
+    }
+    setAvailabilityBusy(true);
+    setAvailabilityStatus('Running low-rate load...');
+    setAvailabilityOutput('');
+    try {
+      const body: AvailabilityLoadRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: req.name,
+        qtype: req.qtype,
+        count: loadCount,
+        qps: loadQps,
+      };
+      const result = await postJson<AvailabilityLoadResponse>(
+        `${LAB_API_BASE}/availability/load`,
+        body,
+        labHeaders
+      );
+      const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+      setAvailabilityOutput(`${result.command}\n\n${text}`.trim());
+      setAvailabilityStatus(
+        result.ok ? 'Load test completed.' : 'Load test completed with errors.'
+      );
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setAvailabilityStatus,
+        setAvailabilityOutput
+      );
+    } finally {
+      setAvailabilityBusy(false);
+    }
+  };
+
+  const runDnsperf = async () => {
+    if (missingLabKey) {
+      setDnsperfStatus('Missing Lab API key.');
+      return;
+    }
+    setDnsperfBusy(true);
+    setDnsperfStatus('Running dnsperf...');
+    setDnsperfOutput('');
+    setDnsperfSummary(null);
+    try {
+      const body: DnsperfRequest = {
+        target: perfTarget,
+        duration_s: dnsperfDuration,
+        qps: dnsperfQps,
+        max_queries: dnsperfMaxQueries,
+        threads: dnsperfThreads,
+        clients: dnsperfClients,
+        queries: perfQueries.trim() ? perfQueries : undefined,
+      };
+      const result = await postJson<DnsperfResponse>(
+        `${LAB_API_BASE}/perf/dnsperf`,
+        body,
+        labHeaders
+      );
+      const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+      setDnsperfOutput(`${result.command}\n\n${text}`.trim());
+      setDnsperfSummary(result.summary ?? null);
+      setDnsperfStatus(result.ok ? 'dnsperf completed.' : 'dnsperf completed with errors.');
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setDnsperfStatus,
+        setDnsperfOutput
+      );
+    } finally {
+      setDnsperfBusy(false);
+    }
+  };
+
+  const runResperf = async () => {
+    if (missingLabKey) {
+      setResperfStatus('Missing Lab API key.');
+      return;
+    }
+    setResperfBusy(true);
+    setResperfStatus('Running resperf...');
+    setResperfOutput('');
+    setResperfPlotFile('');
+    try {
+      const body: ResperfRequest = {
+        target: perfTarget,
+        max_qps: resperfMaxQps,
+        ramp_qps: resperfRampQps,
+        clients: resperfClients,
+        queries_per_step: resperfQueriesPerStep,
+        plot_file: resperfPlotName.trim() ? resperfPlotName.trim() : undefined,
+        queries: perfQueries.trim() ? perfQueries : undefined,
+      };
+      const result = await postJson<ResperfResponse>(
+        `${LAB_API_BASE}/perf/resperf`,
+        body,
+        labHeaders
+      );
+      const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+      setResperfOutput(`${result.command}\n\n${text}`.trim());
+      setResperfPlotFile(result.plot_file ?? '');
+      setResperfStatus(result.ok ? 'resperf completed.' : 'resperf completed with errors.');
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setResperfStatus,
+        setResperfOutput
+      );
+    } finally {
+      setResperfBusy(false);
+    }
+  };
+
+  const runFloodTest = async () => {
+    if (missingLabKey) {
+      setFloodStatus('Missing Lab API key.');
+      return;
+    }
+    setFloodBusy(true);
+    setFloodStatus('Running flooding guardrails...');
+    setFloodSummary('');
+    setFloodResults([]);
+    try {
+      const body: FloodTestRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: req.name,
+        qtype: req.qtype,
+        qps_start: floodStartQps,
+        qps_end: floodEndQps,
+        qps_step: floodStepQps,
+        step_seconds: floodStepSeconds,
+        max_outstanding: floodOutstanding,
+        timeout_ms: floodTimeoutMs,
+        stop_loss_pct: floodStopLoss,
+        stop_p95_ms: floodStopP95,
+        stop_servfail_pct: floodStopServfail,
+        stop_cpu_pct: floodStopCpu,
+      };
+      const result = await postJson<FloodTestResponse>(
+        `${LAB_API_BASE}/availability/flood`,
+        body,
+        labHeaders
+      );
+      setFloodResults(result.steps);
+      const summary = result.stopped_early
+        ? `Stopped early: ${result.stop_reason || 'guardrail'}`
+        : 'Completed full ramp.';
+      setFloodSummary(`${result.target} • ${summary}`);
+      setFloodStatus(summary);
+    } catch (err) {
+      setFloodStatus((err as Error).message);
+      setFloodResults([]);
+    } finally {
+      setFloodBusy(false);
+    }
+  };
+
+  const runBaseline = async () => {
+    if (missingLabKey) {
+      setBaselineStatus('Missing Lab API key.');
+      return;
+    }
+    setBaselineBusy(true);
+    setBaselineStatus(`Collecting baseline (${baselineDuration}s)...`);
+    setBaselineSummary(null);
+    setBaselineCaptureFile('');
+    const startedAt = Date.now();
+    let captureFile: string | null = null;
+    try {
+      const before = await getJson<AvailabilityMetricsResponse>(
+        `${LAB_API_BASE}/availability/metrics`,
+        labHeaders
+      );
+      const stats = await getJson<ResolverStatsResponse>(
+        `${LAB_API_BASE}/availability/resolver-stats?resolver=${req.resolver}`,
+        labHeaders
+      );
+      try {
+        const captureStart = await postJson<CaptureStartResponse>(
+          `${LAB_API_BASE}/capture/start`,
+          { target: 'authoritative', filter: 'dns' },
+          labHeaders
+        );
+        captureFile = captureStart.file;
+      } catch (err) {
+        if (!(err as Error).message.includes('HTTP 409')) {
+          throw err;
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, baselineDuration * 1000));
+
+      let upstreamQueries: number | undefined;
+      if (captureFile) {
+        try {
+          await postJson<CaptureStopResponse>(
+            `${LAB_API_BASE}/capture/stop`,
+            { target: 'authoritative' },
+            labHeaders
+          );
+          const summary = await getJson<CaptureSummaryResponse>(
+            `${LAB_API_BASE}/capture/summary?file=${encodeURIComponent(captureFile)}`,
+            labHeaders
+          );
+          upstreamQueries = summary.upstream_queries;
+        } catch {
+          // ignore capture errors
+        }
+      }
+
+      const after = await getJson<AvailabilityMetricsResponse>(
+        `${LAB_API_BASE}/availability/metrics`,
+        labHeaders
+      );
+      const probeBody: AvailabilityProbeRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: req.name,
+        qtype: req.qtype,
+        count: baselineProbeCount,
+      };
+      const probe = await postJson<AvailabilityProbeResponse>(
+        `${LAB_API_BASE}/availability/probe`,
+        probeBody,
+        labHeaders
+      );
+
+      const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+      const totalDelta = after.totals.queries - before.totals.queries;
+      const qps = totalDelta / elapsed;
+
+      setBaselineSummary({
+        duration_s: elapsed,
+        qps,
+        total_queries: totalDelta,
+        cache_hit_ratio: after.ratios.cache_hit,
+        nxdomain_ratio: after.ratios.nxdomain,
+        servfail_ratio: after.ratios.servfail,
+        p50_ms: probe.p50_ms ?? probe.avg_ms,
+        p95_ms: probe.p95_ms ?? probe.max_ms,
+        cpu_pct: stats.cpu_pct,
+        mem_mb: stats.mem_bytes ? stats.mem_bytes / (1024 * 1024) : undefined,
+        mem_pct: stats.mem_pct,
+        upstream_qps:
+          upstreamQueries !== undefined ? upstreamQueries / elapsed : undefined,
+        upstream_queries: upstreamQueries,
+        capture_file: captureFile ?? undefined,
+      });
+      if (captureFile) {
+        setBaselineCaptureFile(captureFile);
+      }
+      setBaselineStatus('Baseline completed.');
+    } catch (err) {
+      setBaselineStatus((err as Error).message);
+    } finally {
+      setBaselineBusy(false);
+    }
+  };
+
+  const runWarmup = async () => {
+    if (missingLabKey) {
+      setBaselineStatus('Missing Lab API key.');
+      return;
+    }
+    setWarmupBusy(true);
+    setBaselineStatus('Running warm-up (short load)...');
+    try {
+      const body: AvailabilityLoadRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: req.name,
+        qtype: req.qtype,
+        count: 50,
+        qps: 20,
+      };
+      await postJson<AvailabilityLoadResponse>(
+        `${LAB_API_BASE}/availability/load`,
+        body,
+        labHeaders
+      );
+      setBaselineStatus('Warm-up completed.');
+    } catch (err) {
+      setBaselineStatus((err as Error).message);
+    } finally {
+      setWarmupBusy(false);
+    }
+  };
+
+  const startCooldown = (seconds: number) => {
+    setCooldownRemaining(seconds);
+    const start = Date.now();
+    const timer = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - start) / 1000);
+      const remaining = Math.max(0, seconds - elapsed);
+      setCooldownRemaining(remaining);
+      if (remaining === 0) {
+        window.clearInterval(timer);
+      }
+    }, 500);
+  };
+
+  const restartResolver = async () => {
+    if (missingLabKey) {
+      setBaselineStatus('Missing Lab API key.');
+      return;
+    }
+    setBaselineStatus('Restarting resolver (flush all cache)...');
+    try {
+      await postJson<LabDigResponse>(`${LAB_API_BASE}/resolver/restart`, {}, labHeaders);
+      setBaselineStatus('Resolver restarted.');
+    } catch (err) {
+      setBaselineStatus((err as Error).message);
+    }
+  };
+
+  const flushResolver = async () => {
+    if (missingLabKey) {
+      setBaselineStatus('Missing Lab API key.');
+      return;
+    }
+    setBaselineStatus('Flushing resolver cache (example.test)...');
+    try {
+      await postJson<LabDigResponse>(
+        `${LAB_API_BASE}/resolver/flush`,
+        { zone: 'example.test' },
+        labHeaders
+      );
+      setBaselineStatus('Resolver cache flushed.');
+    } catch (err) {
+      setBaselineStatus((err as Error).message);
+    }
+  };
+
+  const loadServiceLimits = async () => {
+    if (missingLabKey) {
+      setLimitsStatus('Missing Lab API key.');
+      return;
+    }
+    setLimitsBusy(true);
+    setLimitsStatus('Loading service limit configs...');
+    try {
+      const [unboundCfg, bindCfg] = await Promise.all([
+        getJson<ConfigFileResponse>(
+          `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
+            'unbound/unbound.conf'
+          )}`,
+          labHeaders
+        ),
+        getJson<ConfigFileResponse>(
+          `${LAB_API_BASE}/config/file?path=${encodeURIComponent(
+            'bind/named.conf'
+          )}`,
+          labHeaders
+        ),
+      ]);
+
+      const unboundKeys = [
+        'num-queries-per-thread',
+        'outgoing-range',
+        'outgoing-num-tcp',
+        'ratelimit',
+        'ip-ratelimit',
+        'msg-cache-size',
+        'rrset-cache-size',
+        'neg-cache-size',
+      ];
+      const unboundLines = unboundKeys.map((key) => {
+        const value = readConfigValue(unboundCfg.content, key);
+        return `${key}: ${value ?? 'not set'}`;
+      });
+      setUnboundLimitLines(unboundLines);
+
+      const rrlBlock = extractBlock(bindCfg.content, 'rate-limit');
+      setBindRrlBlock(rrlBlock || 'rate-limit block not found.');
+      setBindRrlEnabled(Boolean(rrlBlock));
+      setLimitsStatus('Loaded service limits.');
+    } catch (err) {
+      setLimitsStatus((err as Error).message);
+      setUnboundLimitLines([]);
+      setBindRrlBlock('');
+      setBindRrlEnabled(null);
+    } finally {
+      setLimitsBusy(false);
+    }
+  };
+
+  const runRateLimitProof = async () => {
+    if (missingLabKey) {
+      setLimitsStatus('Missing Lab API key.');
+      return;
+    }
+    setLimitsBusy(true);
+    setLimitsStatus('Running rate-limit proof (baseline -> flood -> metrics)...');
+    setRateLimitDelta(null);
+    setRateLimitAfter(null);
+    try {
+      const before = await getJson<AvailabilityMetricsResponse>(
+        `${LAB_API_BASE}/availability/metrics`,
+        labHeaders
+      );
+      const floodBody: FloodTestRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: req.name,
+        qtype: req.qtype,
+        qps_start: 120,
+        qps_end: 120,
+        qps_step: 1,
+        step_seconds: 10,
+        max_outstanding: 200,
+        timeout_ms: 1000,
+        stop_loss_pct: 0,
+        stop_p95_ms: 0,
+        stop_servfail_pct: 0,
+        stop_cpu_pct: 0,
+      };
+      await postJson<FloodTestResponse>(
+        `${LAB_API_BASE}/availability/flood`,
+        floodBody,
+        labHeaders
+      );
+      const after = await getJson<AvailabilityMetricsResponse>(
+        `${LAB_API_BASE}/availability/metrics`,
+        labHeaders
+      );
+      setRateLimitAfter(after);
+      setRateLimitDelta({
+        ratelimited: after.totals.ratelimited - before.totals.ratelimited,
+        ip_ratelimited: after.totals.ip_ratelimited - before.totals.ip_ratelimited,
+        total: after.totals.queries - before.totals.queries,
+      });
+      setLimitsStatus('Rate-limit proof completed.');
+    } catch (err) {
+      setLimitsStatus((err as Error).message);
+      setRateLimitDelta(null);
+      setRateLimitAfter(null);
+    } finally {
+      setLimitsBusy(false);
+    }
+  };
+
+  const runRrlTest = async () => {
+    if (missingLabKey) {
+      setRrlStatus('Missing Lab API key.');
+      return;
+    }
+    setLimitsBusy(true);
+    setRrlStatus('Running BIND RRL test...');
+    setRrlResult(null);
+    try {
+      const body: RrlTestRequest = {
+        name: 'example.test',
+        qtype: 'A',
+        count: rrlCount,
+        log_tail: 200,
+      };
+      const result = await postJson<RrlTestResponse>(
+        `${LAB_API_BASE}/availability/rrl-test`,
+        body,
+        labHeaders
+      );
+      setRrlResult(result);
+      setRrlStatus(
+        result.rrl_enabled
+          ? result.matches.length > 0
+            ? `RRL log hits: ${result.matches.length}`
+            : 'RRL enabled but no log hits detected.'
+          : 'RRL disabled. Enable in Controls.'
+      );
+    } catch (err) {
+      setRrlStatus((err as Error).message);
+      setRrlResult(null);
+    } finally {
+      setLimitsBusy(false);
+    }
+  };
+
+  const toggleAmpQtype = (qtype: string) => {
+    setAmpQtypes((prev) =>
+      prev.includes(qtype) ? prev.filter((q) => q !== qtype) : [...prev, qtype]
+    );
+  };
+
+  const toggleAmpEdns = (size: number) => {
+    setAmpEdnsSizes((prev) =>
+      prev.includes(size) ? prev.filter((s) => s !== size) : [...prev, size]
+    );
+  };
+
+  const runAmplificationTest = async () => {
+    if (missingLabKey) {
+      setAmpStatus('Missing Lab API key.');
+      return;
+    }
+    if (ampQtypes.length === 0 || ampEdnsSizes.length === 0) {
+      setAmpStatus('Select at least one qtype and EDNS size.');
+      return;
+    }
+    setAmpBusy(true);
+    setAmpStatus('Running amplification test...');
+    try {
+      const body: AmplificationTestRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        name: ampName,
+        qtypes: ampQtypes,
+        edns_sizes: ampEdnsSizes,
+        count_per_qtype: ampCount,
+        dnssec: ampDnssec,
+        tcp_fallback: ampTcpFallback,
+      };
+      const result = await postJson<AmplificationTestResponse>(
+        `${LAB_API_BASE}/amplification/test`,
+        body,
+        labHeaders
+      );
+      setAmpResults(result.results);
+      setAmpStatus(`Completed (${result.results.length} rows).`);
+    } catch (err) {
+      setAmpStatus((err as Error).message);
+      setAmpResults([]);
+    } finally {
+      setAmpBusy(false);
+    }
+  };
+
+  const runMixLoad = async () => {
+    if (missingLabKey) {
+      setMixStatus('Missing Lab API key.');
+      return;
+    }
+    setMixBusy(true);
+    setMixStatus('Running mixed load...');
+    try {
+      const body: MixLoadRequest = {
+        profile: req.client,
+        resolver: req.resolver,
+        zone: mixZone,
+        count: mixCount,
+        edns_size: mixEdns,
+        dnssec: mixDnssec,
+        tcp_fallback: mixTcpFallback,
+      };
+      const result = await postJson<MixLoadResponse>(
+        `${LAB_API_BASE}/amplification/mix`,
+        body,
+        labHeaders
+      );
+      setMixResult(result);
+      setMixStatus('Mix run completed.');
+    } catch (err) {
+      setMixStatus((err as Error).message);
+      setMixResult(null);
+    } finally {
+      setMixBusy(false);
+    }
+  };
+
+  const loadControls = async () => {
+    if (missingLabKey) {
+      setControlsStatus('Missing Lab API key.');
+      return;
+    }
+    setControlsBusy(true);
+    setControlsStatus('Loading controls...');
+    try {
+      const result = await getJson<ControlsStatusResponse>(
+        `${LAB_API_BASE}/controls/status`,
+        labHeaders
+      );
+      setUnboundCtl(result.unbound);
+      setBindCtl(result.bind);
+      setControlsStatus('Loaded.');
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setControlsStatus
+      );
+    } finally {
+      setControlsBusy(false);
+    }
+  };
+
+  const applyControls = async () => {
+    if (missingLabKey) {
+      setControlsStatus('Missing Lab API key.');
+      return;
+    }
+    setControlsBusy(true);
+    setControlsStatus('Applying controls...');
+    try {
+      const result = await postJson<ControlsStatusResponse>(
+        `${LAB_API_BASE}/controls/apply`,
+        { unbound: unboundCtl, bind: bindCtl },
+        labHeaders
+      );
+      setUnboundCtl(result.unbound);
+      setBindCtl(result.bind);
+      setControlsStatus('Applied and restarted services.');
+      await fetchAvailabilityMetrics();
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setControlsStatus
+      );
+    } finally {
+      setControlsBusy(false);
+    }
+  };
+
   return (
     <div className="page">
-      <header className="header">
-        <div>
-          <h1>DNS Security Lab</h1>
-          <p>React UI on Win11, talking to per-client APIs and the lab API.</p>
+      <header className="hero">
+        <div className="hero-main">
+          <div className="eyebrow">DNS Security Lab</div>
+          <h1>DNS Security Control System</h1>
+          <p>
+            One-page console for queries, DNSSEC validation, privacy checks, and
+            safe operational controls across the lab stack.
+          </p>
+          <div className="hero-actions">
+            <button onClick={checkHealth} disabled={isBusy}>
+              Health Check
+            </button>
+            <button onClick={loadIndicators} disabled={isBusy || missingLabKey}>
+              Refresh Indicators
+            </button>
+            <button onClick={fetchAvailabilityMetrics} disabled={availabilityBusy || missingLabKey}>
+              Fetch Metrics
+            </button>
+          </div>
         </div>
-        <div className="pill">
-          API: {backend === 'client' ? clientBase : LAB_API_BASE} • Resolver: {resolverLabel}
+        <div className="hero-panel">
+          <div className="hero-card">
+            <div className="hero-label">Active API</div>
+            <div className="hero-value">
+              {backend === 'client' ? 'Client API' : 'Lab API'}
+            </div>
+            <div className="hero-sub">
+              {backend === 'client' ? clientBase : LAB_API_BASE}
+            </div>
+          </div>
+          <div className="hero-card">
+            <div className="hero-label">Resolver</div>
+            <div className="hero-value">{resolverLabel}</div>
+            <div className="hero-sub">Profile: {req.client}</div>
+          </div>
+          <div className="hero-card">
+            <div className="hero-label">Key Indicators</div>
+            <div className="hero-pills">
+              <span className={`status-pill ${indicatorClass(indicators.nsec3Child)}`}>
+                Child NSEC3
+              </span>
+              <span className={`status-pill ${indicatorClass(indicators.nsec3Parent)}`}>
+                Parent NSEC3
+              </span>
+              <span className={`status-pill ${indicatorClass(indicators.aggressiveNsec)}`}>
+                Aggressive NSEC
+              </span>
+              <span className={`status-pill ${indicatorClass(indicators.qnameMinim)}`}>
+                QNAME Min
+              </span>
+            </div>
+            <div className="hero-sub">
+              Updated: {indicators.updatedAt || 'not loaded'}
+            </div>
+          </div>
         </div>
       </header>
+
+      <nav className="section-tabs">
+        {SECTION_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={activeSection === tab.id ? 'active' : ''}
+            onClick={() => selectSection(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
 
       {backend === 'lab_api' && missingLabKey && (
         <div className="alert">
@@ -1193,7 +3017,108 @@ export default function App() {
         </div>
       )}
 
-      <section className="card">
+      {isSectionVisible('overview') && (
+      <section className="card overview-card" id="overview">
+        <div className="card-title">Overview</div>
+        <div className="overview-grid">
+          <div className="overview-tile">
+            <div className="overview-label">Status</div>
+            <div className="overview-value">{status || 'Ready'}</div>
+            <div className="overview-sub">Dig + health feedback</div>
+          </div>
+          <div className="overview-tile">
+            <div className="overview-label">Availability</div>
+            <div className="overview-value">
+              {availabilityMetrics ? `${availabilityMetrics.totals.queries} queries` : 'Not loaded'}
+            </div>
+            <div className="overview-sub">
+              Updated: {availabilityUpdatedAt || '—'}
+            </div>
+          </div>
+          <div className="overview-tile">
+            <div className="overview-label">Privacy</div>
+            <div className="overview-value">
+              QNAME: {formatIndicator(indicators.qnameMinim)}
+            </div>
+            <div className="overview-sub">DoT + DoH enabled</div>
+          </div>
+          <div className="overview-tile">
+            <div className="overview-label">Capture</div>
+            <div className="overview-value">
+              Resolver: {captureRunning.resolver ? 'running' : 'idle'}
+            </div>
+            <div className="overview-sub">
+              Auth: {captureRunning.authoritative ? 'running' : 'idle'}
+            </div>
+          </div>
+        </div>
+      </section>
+      )}
+
+      {isSectionVisible('topology') && (
+      <section className="card" id="topology">
+        <div className="card-title">Nodes / Topology</div>
+        <div className="topology-grid">
+          {TOPOLOGY_NODES.map((node) => (
+            <div key={node.name} className="node-card">
+              <div className="node-header">
+                <div className="node-title">{node.name}</div>
+                <button
+                  type="button"
+                  className={`status-dot action ${healthClass(node.health)}`}
+                  onClick={scrollToConfigs}
+                  title="Open config viewer"
+                >
+                  {healthLabel(node.health)}
+                </button>
+              </div>
+              <div className="node-role">{node.role}</div>
+              <div className="node-meta">
+                <div>
+                  <strong>IP:</strong> {node.ip}
+                </div>
+                <div>
+                  <strong>Ports:</strong> {node.ports}
+                </div>
+              </div>
+              <div className="node-tags">
+                {node.tags.map((tag) => (
+                  <span key={tag} className="tag">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <ul className="node-list">
+                {node.meta.map((meta) => (
+                  <li key={meta}>{meta}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+        <div className="topology-notes">
+          <div className="notes-panel">
+            <div className="notes-title">React UI MVP checklist</div>
+            {MVP_UI_NOTES.map((section) => (
+              <div key={section.title} className="notes-section">
+                <div className="notes-heading">{section.title}</div>
+                <ul>
+                  {section.items.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <div className="notes-image">
+            <img src="/ui-notes.svg" alt="MVP UI notes reference" />
+          </div>
+        </div>
+      </section>
+      )}
+
+      {isSectionVisible('dig') && (
+      <section className="card" id="dig">
         <div className="card-title">Dig Request</div>
         <div className="grid">
           <label>
@@ -1319,15 +3244,19 @@ export default function App() {
 
         <div className="status">{status || 'Ready.'}</div>
       </section>
+      )}
 
-      <section className="card" ref={outputRef}>
+      {isSectionVisible('output') && (
+      <section className="card" id="output" ref={outputRef}>
         <div className="card-title">Output</div>
         <pre className="output">
           {output ? `${output.command}\n\n${output.text}` : 'No output yet.'}
         </pre>
       </section>
+      )}
 
-      <section className="card">
+      {isSectionVisible('dnssec') && (
+      <section className="card" id="dnssec">
         <div className="card-title">NSEC3 / Aggressive NSEC</div>
         <div className="hint">
           <div>
@@ -1381,6 +3310,12 @@ export default function App() {
           >
             Switch to NSEC (inline)
           </button>
+          <button
+            onClick={clearAuthoritativeSigned}
+            disabled={isBusy || signingBusy || missingLabKey}
+          >
+            Clear Signed Files
+          </button>
           <button onClick={loadIndicators} disabled={isBusy || missingLabKey}>
             Refresh Indicators
           </button>
@@ -1389,6 +3324,32 @@ export default function App() {
           {signingStatus ||
             'Use the switch buttons to change between inline NSEC and offline NSEC3.'}
         </div>
+        {signingSteps.length > 0 && (
+          <div className="step-list">
+            {signingSteps.map((step, index) => {
+              const detail = [step.stdout?.trim(), step.stderr?.trim()]
+                .filter(Boolean)
+                .join('\n');
+              return (
+                <div
+                  key={`${step.step}-${index}`}
+                  className={`step-item ${step.ok ? 'ok' : 'fail'}`}
+                >
+                  <div className="step-header">
+                    <div className="step-label">
+                      {index + 1}. {step.step}
+                    </div>
+                    <span className={`step-badge ${step.ok ? 'ok' : 'fail'}`}>
+                      {step.ok ? 'OK' : 'FAIL'}
+                    </span>
+                  </div>
+                  <div className="step-command">{step.command}</div>
+                  {detail && <pre className="step-output">{detail}</pre>}
+                </div>
+              );
+            })}
+          </div>
+        )}
         <pre className="output">
           {signingOutput || 'No switch output yet.'}
         </pre>
@@ -1433,6 +3394,10 @@ export default function App() {
             Runs two NXDOMAIN queries; the second should be synthesized from cached
             denial proofs.
           </div>
+          <div className="preset-note">
+            This demo intentionally uses two non-existent names to validate
+            aggressive NSEC behavior. NXDOMAIN is expected.
+          </div>
           <div className="actions">
             <button onClick={runAggressiveNsecDemo} disabled={isBusy}>
               Run Demo
@@ -1442,6 +3407,12 @@ export default function App() {
               disabled={isBusy || proofBusy || missingLabKey}
             >
               Run Demo + Proof
+            </button>
+            <button
+              onClick={runAggressiveNsecProofCold}
+              disabled={isBusy || proofBusy || missingLabKey}
+            >
+              Run Demo + Proof (Cold)
             </button>
             <button
               onClick={() => proofCaptureFile && downloadCapture(proofCaptureFile)}
@@ -1488,9 +3459,11 @@ export default function App() {
           'Use "Run Demo + Proof" to capture authoritative traffic and count upstream queries.'}
       </div>
       <pre className="output">{proofOutput || 'No proof output yet.'}</pre>
-    </section>
+      </section>
+      )}
 
-    <section className="card">
+    {isSectionVisible('privacy') && (
+    <section className="card" id="privacy">
       <div className="card-title">DNS Query Privacy</div>
       <div className="hint">
         Transport privacy and log minimization (DoT, DoH, QNAME minimization).
@@ -1588,6 +3561,30 @@ export default function App() {
             </pre>
           </div>
           <div className="privacy-block">
+            <div className="privacy-title">Query target</div>
+            <div className="privacy-text">
+              Current: <code>{req.name}</code> ({req.qtype})
+            </div>
+            <div className="privacy-choice">
+              <button
+                type="button"
+                className={req.name === PRIVACY_EXISTING_NAME ? 'active' : ''}
+                onClick={() => setPrivacyName(PRIVACY_EXISTING_NAME)}
+                disabled={privacyBusy}
+              >
+                Use existing
+              </button>
+              <button
+                type="button"
+                className={req.name === PRIVACY_NONEXISTENT_NAME ? 'active' : ''}
+                onClick={() => setPrivacyName(PRIVACY_NONEXISTENT_NAME)}
+                disabled={privacyBusy}
+              >
+                Use non-existent
+              </button>
+            </div>
+          </div>
+          <div className="privacy-block">
             <div className="privacy-title">Query example</div>
             <pre className="output compact">
               {`kdig +tls @127.0.0.1 -p 853 www.example.test`}
@@ -1624,6 +3621,30 @@ export default function App() {
             <pre className="output compact">
               {`curl -k https://127.0.0.1:8443/health`}
             </pre>
+          </div>
+          <div className="privacy-block">
+            <div className="privacy-title">Query target</div>
+            <div className="privacy-text">
+              Current: <code>{req.name}</code> ({req.qtype})
+            </div>
+            <div className="privacy-choice">
+              <button
+                type="button"
+                className={req.name === PRIVACY_EXISTING_NAME ? 'active' : ''}
+                onClick={() => setPrivacyName(PRIVACY_EXISTING_NAME)}
+                disabled={privacyBusy}
+              >
+                Use existing
+              </button>
+              <button
+                type="button"
+                className={req.name === PRIVACY_NONEXISTENT_NAME ? 'active' : ''}
+                onClick={() => setPrivacyName(PRIVACY_NONEXISTENT_NAME)}
+                disabled={privacyBusy}
+              >
+                Use non-existent
+              </button>
+            </div>
           </div>
           <div className="privacy-block">
             <div className="privacy-title">Notes</div>
@@ -1679,8 +3700,1267 @@ export default function App() {
       <div className="status">{privacyStatus || 'Ready.'}</div>
       <pre className="output">{privacyOutput || 'No privacy checks yet.'}</pre>
     </section>
+    )}
 
-      <section className="card">
+      {isSectionVisible('availability') && (
+      <section className="card" id="availability">
+        <div className="card-title">Availability / Abuse Resistance</div>
+        <div className="hint">
+          <div>
+            Monitors resolver health signals (NXDOMAIN, SERVFAIL, latency) and
+            runs controlled local load. Uses the current query settings above.
+          </div>
+          <div>
+            Target: <strong>{resolverLabel}</strong> • Name:{' '}
+            <code>{req.name}</code> • QTYPE: <code>{req.qtype}</code> • Client:{' '}
+            <code>{req.client}</code>
+          </div>
+        </div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="indicator-row">
+          <div className={`indicator ${ratioClass(nxdomainRatio, 0.2)}`}>
+            <span className="indicator-dot" />
+            NXDOMAIN: {formatPercent(nxdomainRatio)}
+          </div>
+          <div className={`indicator ${ratioClass(servfailRatio, 0.05)}`}>
+            <span className="indicator-dot" />
+            SERVFAIL: {formatPercent(servfailRatio)}
+          </div>
+          <div className={`indicator ${ratioClass(ratelimitRatio, 0.02)}`}>
+            <span className="indicator-dot" />
+            Rate-limited: {formatPercent(ratelimitRatio)}
+          </div>
+          <div className={`indicator ${ratioClass(ipRatelimitRatio, 0.02)}`}>
+            <span className="indicator-dot" />
+            IP rate-limited: {formatPercent(ipRatelimitRatio)}
+          </div>
+        </div>
+        <div className="metrics-grid">
+          <div className="metric">
+            <div className="metric-label">Total queries</div>
+            <div className="metric-value">
+              {availabilityMetrics ? availabilityMetrics.totals.queries : '—'}
+            </div>
+            <div className="metric-sub">
+              Cache hit ratio: {formatPercent(cacheHitRatio)}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">NXDOMAIN</div>
+            <div className="metric-value">
+              {availabilityMetrics ? availabilityMetrics.totals.nxdomain : '—'}
+            </div>
+            <div className="metric-sub">
+              SERVFAIL: {availabilityMetrics ? availabilityMetrics.totals.servfail : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Rate limited</div>
+            <div className="metric-value">
+              {availabilityMetrics ? availabilityMetrics.totals.ratelimited : '—'}
+            </div>
+            <div className="metric-sub">
+              IP rate-limited:{' '}
+              {availabilityMetrics ? availabilityMetrics.totals.ip_ratelimited : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Avg recursion</div>
+            <div className="metric-value">
+              {availabilityMetrics ? `${availabilityMetrics.avg_recursion_ms} ms` : '—'}
+            </div>
+            <div className="metric-sub">
+              Probe avg:{' '}
+              {availabilityProbe ? `${availabilityProbe.avg_ms} ms` : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Probe min/max</div>
+            <div className="metric-value">
+              {availabilityProbe
+                ? `${availabilityProbe.min_ms} / ${availabilityProbe.max_ms} ms`
+                : '—'}
+            </div>
+            <div className="metric-sub">
+              RCODES:{' '}
+              {availabilityProbe
+                ? Object.entries(availabilityProbe.rcode_counts)
+                    .map(([k, v]) => `${k}:${v}`)
+                    .join(' ')
+                : '—'}
+            </div>
+          </div>
+        </div>
+        <div className="grid">
+          <label>
+            Probe count
+            <input
+              type="number"
+              min={1}
+              max={30}
+              value={probeCount}
+              onChange={(e) => setProbeCount(Number(e.target.value))}
+              disabled={availabilityBusy}
+            />
+          </label>
+          <label>
+            Load count
+            <input
+              type="number"
+              min={1}
+              max={600}
+              value={loadCount}
+              onChange={(e) => setLoadCount(Number(e.target.value))}
+              disabled={availabilityBusy}
+            />
+          </label>
+          <label>
+            Load QPS
+            <input
+              type="number"
+              min={1}
+              max={100}
+              value={loadQps}
+              onChange={(e) => setLoadQps(Number(e.target.value))}
+              disabled={availabilityBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button
+            onClick={fetchAvailabilityMetrics}
+            disabled={availabilityBusy || missingLabKey}
+          >
+            Fetch Stats
+          </button>
+          <button
+            onClick={runAvailabilityProbe}
+            disabled={availabilityBusy || missingLabKey}
+          >
+            Run Latency Probe
+          </button>
+          <button
+            onClick={runAvailabilityLoad}
+            disabled={availabilityBusy || missingLabKey}
+          >
+            Run Low-Rate Load
+          </button>
+        </div>
+        <div className="status">
+          {availabilityStatus ||
+            `Ready.${availabilityUpdatedAt ? ` Last update: ${availabilityUpdatedAt}` : ''}`}
+        </div>
+        <pre className="output">
+          {availabilityOutput || 'No load output yet.'}
+        </pre>
+
+        <div className="section-title">Monitoring Before Test</div>
+        <div className="hint">
+          Collect baseline (CPU/RAM/QPS/latency) for 1–2 minutes and capture upstream
+          traffic before ramping load. Minimal monitoring: tcpdump + Unbound/BIND logs
+          + dnsperf output.
+        </div>
+        <div className="grid">
+          <label>
+            Baseline duration (s)
+            <input
+              type="number"
+              min={30}
+              max={120}
+              value={baselineDuration}
+              onChange={(e) => setBaselineDuration(Number(e.target.value))}
+              disabled={baselineBusy || warmupBusy}
+            />
+          </label>
+          <label>
+            Baseline probe count
+            <input
+              type="number"
+              min={5}
+              max={60}
+              value={baselineProbeCount}
+              onChange={(e) => setBaselineProbeCount(Number(e.target.value))}
+              disabled={baselineBusy || warmupBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={restartResolver} disabled={baselineBusy || missingLabKey}>
+            Restart Resolver
+          </button>
+          <button onClick={flushResolver} disabled={baselineBusy || missingLabKey}>
+            Flush Cache (example.test)
+          </button>
+          <button onClick={runWarmup} disabled={warmupBusy || missingLabKey}>
+            Warm-up (short)
+          </button>
+          <button onClick={runBaseline} disabled={baselineBusy || missingLabKey}>
+            Run Baseline
+          </button>
+          <button
+            onClick={() => startCooldown(60)}
+            disabled={cooldownRemaining > 0}
+          >
+            Start Cooldown (60s)
+          </button>
+        </div>
+        <div className="status">
+          {baselineStatus || 'Ready.'}
+          {cooldownRemaining > 0 ? ` Cooldown: ${cooldownRemaining}s` : ''}
+        </div>
+        <div className="metrics-grid">
+          <div className="metric">
+            <div className="metric-label">Baseline QPS</div>
+            <div className="metric-value">
+              {baselineSummary ? baselineSummary.qps.toFixed(1) : '—'}
+            </div>
+            <div className="metric-sub">
+              Total queries: {baselineSummary ? baselineSummary.total_queries : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Latency p50 / p95</div>
+            <div className="metric-value">
+              {baselineSummary
+                ? `${baselineSummary.p50_ms} / ${baselineSummary.p95_ms} ms`
+                : '—'}
+            </div>
+            <div className="metric-sub">
+              Duration: {baselineSummary ? `${baselineSummary.duration_s}s` : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">NXDOMAIN / SERVFAIL</div>
+            <div className="metric-value">
+              {baselineSummary
+                ? `${formatPercent(baselineSummary.nxdomain_ratio)} / ${formatPercent(
+                    baselineSummary.servfail_ratio
+                  )}`
+                : '—'}
+            </div>
+            <div className="metric-sub">
+              Cache hit: {baselineSummary ? formatPercent(baselineSummary.cache_hit_ratio) : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">CPU / RAM</div>
+            <div className="metric-value">
+              {baselineSummary
+                ? `${baselineSummary.cpu_pct?.toFixed(1) ?? '—'}%`
+                : '—'}
+            </div>
+            <div className="metric-sub">
+              {baselineSummary && baselineSummary.mem_mb
+                ? `${baselineSummary.mem_mb.toFixed(1)} MB${
+                    baselineSummary.mem_pct !== undefined
+                      ? ` (${baselineSummary.mem_pct.toFixed(1)}%)`
+                      : ''
+                  }`
+                : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Upstream QPS</div>
+            <div className="metric-value">
+              {baselineSummary && baselineSummary.upstream_qps !== undefined
+                ? baselineSummary.upstream_qps.toFixed(2)
+                : '—'}
+            </div>
+            <div className="metric-sub">
+              Upstream queries:{' '}
+              {baselineSummary && baselineSummary.upstream_queries !== undefined
+                ? baselineSummary.upstream_queries
+                : '—'}
+            </div>
+          </div>
+        </div>
+        {baselineCaptureFile && (
+          <div className="actions">
+            <button
+              onClick={() => downloadCapture(baselineCaptureFile)}
+              disabled={missingLabKey || baselineBusy}
+            >
+              Download Baseline PCAP
+            </button>
+          </div>
+        )}
+
+        <div className="section-title">Test Procedure</div>
+        <div className="step-list">
+          <div className="step-item">
+            1. Reset/flush cache (or restart resolver) for a clean start.
+          </div>
+          <div className="step-item">2. Warm-up (short test) to stabilize cache.</div>
+          <div className="step-item">
+            3. Run the main test with ramp-up and QPS limits (see Flooding below).
+          </div>
+          <div className="step-item">
+            4. Record data: baseline + upstream counter (pcap/metrics) + logs.
+          </div>
+          <div className="step-item">
+            5. Cooldown: wait 60–120s between series.
+          </div>
+        </div>
+
+        <div className="section-title">Flooding (Guardrails)</div>
+        <div className="hint">
+          Ramp safely inside the lab only. Guardrails stop on loss, latency,
+          SERVFAIL, or sustained CPU. Keep QPS low (20–100 demo, up to 200 if stable).
+        </div>
+        <div className="grid">
+          <label>
+            QPS start
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={floodStartQps}
+              onChange={(e) => setFloodStartQps(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            QPS end
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={floodEndQps}
+              onChange={(e) => setFloodEndQps(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            QPS step
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={floodStepQps}
+              onChange={(e) => setFloodStepQps(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Step seconds
+            <input
+              type="number"
+              min={5}
+              max={120}
+              value={floodStepSeconds}
+              onChange={(e) => setFloodStepSeconds(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Max outstanding
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={floodOutstanding}
+              onChange={(e) => setFloodOutstanding(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Timeout (ms)
+            <input
+              type="number"
+              min={200}
+              max={5000}
+              value={floodTimeoutMs}
+              onChange={(e) => setFloodTimeoutMs(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Stop loss %
+            <input
+              type="number"
+              min={0}
+              max={50}
+              step={0.1}
+              value={floodStopLoss}
+              onChange={(e) => setFloodStopLoss(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Stop p95 (ms)
+            <input
+              type="number"
+              min={0}
+              max={5000}
+              value={floodStopP95}
+              onChange={(e) => setFloodStopP95(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Stop SERVFAIL %
+            <input
+              type="number"
+              min={0}
+              max={50}
+              step={0.1}
+              value={floodStopServfail}
+              onChange={(e) => setFloodStopServfail(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+          <label>
+            Stop CPU %
+            <input
+              type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={floodStopCpu}
+              onChange={(e) => setFloodStopCpu(Number(e.target.value))}
+              disabled={floodBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={runFloodTest} disabled={floodBusy || missingLabKey}>
+            Run Flooding Ramp
+          </button>
+        </div>
+        <div className="status">
+          {floodStatus || 'Ready.'}
+          {floodSummary ? ` ${floodSummary}` : ''}
+        </div>
+        <div className="result-table">
+          <div className="result-row header">
+            <div>Step</div>
+            <div>QPS</div>
+            <div>Sent</div>
+            <div>Loss</div>
+            <div>P95</div>
+            <div>SERVFAIL</div>
+            <div>CPU</div>
+            <div>RCodes / Stop</div>
+          </div>
+          {floodResults.length === 0 ? (
+            <div className="result-row empty">No flooding results yet.</div>
+          ) : (
+            floodResults.map((row) => (
+              <div key={`${row.step}-${row.qps}`} className="result-row">
+                <div>{row.step}</div>
+                <div>{row.qps} ({row.actual_qps})</div>
+                <div>{row.sent}</div>
+                <div>{row.loss_pct.toFixed(2)}%</div>
+                <div>{row.p95_ms} ms</div>
+                <div>{row.servfail_pct.toFixed(2)}%</div>
+                <div>{row.cpu_pct === undefined ? '—' : `${row.cpu_pct.toFixed(1)}%`}</div>
+                <div>
+                  {formatKeyValues(row.rcode_counts)}
+                  {row.stop_reason ? ` • stop: ${row.stop_reason}` : ''}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+      )}
+
+      {isSectionVisible('perf') && (
+      <section className="card" id="perf">
+        <div className="card-title">dnsperf / resperf</div>
+        <div className="hint">
+          <div>
+            Runs inside the <code>dns_perf_tools</code> container. Keep QPS low and
+            local-only. Query list feeds both dnsperf and resperf.
+          </div>
+          <div>
+            Output is the raw tool output plus a small parsed summary (dnsperf).
+          </div>
+          <div>
+            If you see timeouts/loss, lower QPS/clients or temporarily raise
+            Unbound <code>ratelimit</code>/<code>ip-ratelimit</code> (Controls section).
+          </div>
+        </div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="grid">
+          <label>
+            Target
+            <select
+              value={perfTarget}
+              onChange={(e) => setPerfTarget(e.target.value as PerfTarget)}
+              disabled={dnsperfBusy || resperfBusy}
+            >
+              {perfTargetOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <label className="perf-queries">
+          Query list (one per line)
+          <textarea
+            value={perfQueries}
+            onChange={(e) => setPerfQueries(e.target.value)}
+            disabled={dnsperfBusy || resperfBusy}
+          />
+        </label>
+        <div className="actions">
+          <button
+            onClick={() => setPerfQueries(DEFAULT_PERF_QUERIES)}
+            disabled={dnsperfBusy || resperfBusy}
+          >
+            Reset Query List
+          </button>
+        </div>
+
+        <div className="section-title">dnsperf (throughput + latency)</div>
+        <div className="grid">
+          <label>
+            Duration (s)
+            <input
+              type="number"
+              min={1}
+              max={300}
+              value={dnsperfDuration}
+              onChange={(e) => setDnsperfDuration(Number(e.target.value))}
+              disabled={dnsperfBusy}
+            />
+          </label>
+          <label>
+            Max QPS
+            <input
+              type="number"
+              min={1}
+              max={200}
+              value={dnsperfQps}
+              onChange={(e) => setDnsperfQps(Number(e.target.value))}
+              disabled={dnsperfBusy}
+            />
+          </label>
+          <label>
+            Max queries
+            <input
+              type="number"
+              min={1}
+              max={5000}
+              value={dnsperfMaxQueries}
+              onChange={(e) => setDnsperfMaxQueries(Number(e.target.value))}
+              disabled={dnsperfBusy}
+            />
+          </label>
+          <label>
+            Threads
+            <input
+              type="number"
+              min={1}
+              max={8}
+              value={dnsperfThreads}
+              onChange={(e) => setDnsperfThreads(Number(e.target.value))}
+              disabled={dnsperfBusy}
+            />
+          </label>
+          <label>
+            Clients
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={dnsperfClients}
+              onChange={(e) => setDnsperfClients(Number(e.target.value))}
+              disabled={dnsperfBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={runDnsperf} disabled={dnsperfBusy || missingLabKey}>
+            Run dnsperf
+          </button>
+        </div>
+        <div className="status">{dnsperfStatus || 'Ready.'}</div>
+        <div className="metrics-grid">
+          <div className="metric">
+            <div className="metric-label">Queries sent</div>
+            <div className="metric-value">
+              {dnsperfSummary?.queries_sent ?? '—'}
+            </div>
+            <div className="metric-sub">
+              Completed: {dnsperfSummary?.queries_completed ?? '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Lost</div>
+            <div className="metric-value">
+              {dnsperfSummary?.queries_lost ?? '—'}
+            </div>
+            <div className="metric-sub">
+              QPS: {dnsperfSummary?.qps?.toFixed(2) ?? '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Latency avg</div>
+            <div className="metric-value">
+              {typeof dnsperfSummary?.avg_latency_ms === 'number'
+                ? `${dnsperfSummary.avg_latency_ms.toFixed(2)} ms`
+                : '—'}
+            </div>
+            <div className="metric-sub">
+              Min/Max:{' '}
+              {typeof dnsperfSummary?.min_latency_ms === 'number' &&
+              typeof dnsperfSummary?.max_latency_ms === 'number'
+                ? `${dnsperfSummary.min_latency_ms.toFixed(2)} / ${dnsperfSummary.max_latency_ms.toFixed(2)} ms`
+                : '—'}
+            </div>
+          </div>
+        </div>
+        <pre className="output">
+          {dnsperfOutput || 'No dnsperf output yet.'}
+        </pre>
+
+        <div className="section-title">resperf (ramp + capacity curve)</div>
+        <div className="grid">
+          <label>
+            Max QPS
+            <input
+              type="number"
+              min={1}
+              max={300}
+              value={resperfMaxQps}
+              onChange={(e) => setResperfMaxQps(Number(e.target.value))}
+              disabled={resperfBusy}
+            />
+          </label>
+          <label>
+            Ramp QPS
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={resperfRampQps}
+              onChange={(e) => setResperfRampQps(Number(e.target.value))}
+              disabled={resperfBusy}
+            />
+          </label>
+          <label>
+            Clients
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={resperfClients}
+              onChange={(e) => setResperfClients(Number(e.target.value))}
+              disabled={resperfBusy}
+            />
+          </label>
+          <label>
+            Queries/step
+            <input
+              type="number"
+              min={1}
+              max={2000}
+              value={resperfQueriesPerStep}
+              onChange={(e) => setResperfQueriesPerStep(Number(e.target.value))}
+              disabled={resperfBusy}
+            />
+          </label>
+          <label>
+            Plot file name
+            <input
+              value={resperfPlotName}
+              onChange={(e) => setResperfPlotName(e.target.value)}
+              disabled={resperfBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={runResperf} disabled={resperfBusy || missingLabKey}>
+            Run resperf
+          </button>
+        </div>
+        <div className="status">{resperfStatus || 'Ready.'}</div>
+        <div className="hint">
+          <div>
+            Plot file: <code>{resperfPlotFile || 'not generated yet'}</code>
+          </div>
+          <div>
+            Files are saved under <code>captures/</code> on the host.
+          </div>
+        </div>
+        <pre className="output">
+          {resperfOutput || 'No resperf output yet.'}
+        </pre>
+      </section>
+      )}
+
+      {isSectionVisible('limits') && (
+      <section className="card" id="limits">
+        <div className="card-title">Service Limits (Rate Limiting)</div>
+        <div className="hint">
+          Evidence for availability protection: config excerpts + rate-limited metrics
+          + BIND RRL log hits. Use in-lab only.
+        </div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="grid">
+          <label>
+            RRL test count
+            <input
+              type="number"
+              min={1}
+              max={800}
+              value={rrlCount}
+              onChange={(e) => setRrlCount(Number(e.target.value))}
+              disabled={limitsBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={loadServiceLimits} disabled={limitsBusy || missingLabKey}>
+            Load Service Limits
+          </button>
+          <button onClick={runRateLimitProof} disabled={limitsBusy || missingLabKey}>
+            Run Rate-Limit Proof
+          </button>
+          <button onClick={runRrlTest} disabled={limitsBusy || missingLabKey}>
+            Run BIND RRL Test
+          </button>
+        </div>
+        <div className="status">{limitsStatus || 'Ready.'}</div>
+
+        <div className="metrics-grid">
+          <div className="metric">
+            <div className="metric-label">Requests limited (delta)</div>
+            <div className="metric-value">
+              {rateLimitDelta ? rateLimitDelta.ratelimited : '—'}
+            </div>
+            <div className="metric-sub">
+              IP-limited delta:{' '}
+              {rateLimitDelta ? rateLimitDelta.ip_ratelimited : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Queries during proof</div>
+            <div className="metric-value">
+              {rateLimitDelta ? rateLimitDelta.total : '—'}
+            </div>
+            <div className="metric-sub">
+              After total:{' '}
+              {rateLimitAfter ? rateLimitAfter.totals.queries : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">BIND RRL</div>
+            <div className="metric-value">
+              {bindRrlEnabled === null ? '—' : bindRrlEnabled ? 'enabled' : 'disabled'}
+            </div>
+            <div className="metric-sub">{rrlStatus || 'No test yet.'}</div>
+          </div>
+        </div>
+
+        <div className="section-title">Unbound limits (config excerpt)</div>
+        <pre className="output compact">
+          {unboundLimitLines.length > 0
+            ? unboundLimitLines.join('\n')
+            : 'Load service limits to view Unbound settings.'}
+        </pre>
+
+        <div className="section-title">BIND RRL (config excerpt)</div>
+        <pre className="output compact">
+          {bindRrlBlock || 'Load service limits to view BIND rate-limit block.'}
+        </pre>
+
+        <div className="section-title">BIND RRL log excerpt</div>
+        <pre className="output compact">
+          {rrlResult?.log_excerpt || 'Run BIND RRL test to collect log hits.'}
+        </pre>
+      </section>
+      )}
+
+      {isSectionVisible('controls') && (
+      <section className="card" id="controls">
+        <div className="card-title">Controls</div>
+        <div className="hint">
+          Toggle safety knobs and apply immediately. Changes restart the affected
+          services.
+        </div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="section-title">Unbound (resolver)</div>
+        <div className="control-note">
+          Dropped (ratelimited):{' '}
+          {availabilityMetrics ? availabilityMetrics.totals.ratelimited : '—'} • IP
+          ratelimited:{' '}
+          {availabilityMetrics ? availabilityMetrics.totals.ip_ratelimited : '—'}
+        </div>
+        <div className="grid">
+          <label>
+            ratelimit
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={unboundCtl.ratelimit}
+              onChange={(e) =>
+                setUnboundCtl({ ...unboundCtl, ratelimit: Number(e.target.value) })
+              }
+              disabled={controlsBusy}
+            />
+          </label>
+          <label>
+            ip-ratelimit
+            <input
+              type="number"
+              min={0}
+              max={10000}
+              value={unboundCtl.ip_ratelimit}
+              onChange={(e) =>
+                setUnboundCtl({
+                  ...unboundCtl,
+                  ip_ratelimit: Number(e.target.value),
+                })
+              }
+              disabled={controlsBusy}
+            />
+          </label>
+          <label>
+            unwanted-reply-threshold
+            <input
+              type="number"
+              min={0}
+              max={100000}
+              value={unboundCtl.unwanted_reply_threshold}
+              onChange={(e) =>
+                setUnboundCtl({
+                  ...unboundCtl,
+                  unwanted_reply_threshold: Number(e.target.value),
+                })
+              }
+              disabled={controlsBusy}
+            />
+          </label>
+          <label>
+            serve-expired-ttl
+            <input
+              type="number"
+              min={0}
+              max={86400}
+              value={unboundCtl.serve_expired_ttl}
+              onChange={(e) =>
+                setUnboundCtl({
+                  ...unboundCtl,
+                  serve_expired_ttl: Number(e.target.value),
+                })
+              }
+              disabled={controlsBusy || !unboundCtl.serve_expired}
+            />
+          </label>
+          <label>
+            msg-cache-size
+            <input
+              value={unboundCtl.msg_cache_size}
+              onChange={(e) =>
+                setUnboundCtl({ ...unboundCtl, msg_cache_size: e.target.value })
+              }
+              placeholder="e.g. 50m"
+              disabled={controlsBusy}
+            />
+          </label>
+          <label>
+            rrset-cache-size
+            <input
+              value={unboundCtl.rrset_cache_size}
+              onChange={(e) =>
+                setUnboundCtl({ ...unboundCtl, rrset_cache_size: e.target.value })
+              }
+              placeholder="e.g. 100m"
+              disabled={controlsBusy}
+            />
+          </label>
+        </div>
+        <div className="toggle-row">
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={unboundCtl.serve_expired}
+              onChange={(e) =>
+                setUnboundCtl({ ...unboundCtl, serve_expired: e.target.checked })
+              }
+              disabled={controlsBusy}
+            />
+            serve-expired
+          </label>
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={unboundCtl.prefetch}
+              onChange={(e) =>
+                setUnboundCtl({ ...unboundCtl, prefetch: e.target.checked })
+              }
+              disabled={controlsBusy}
+            />
+            prefetch
+          </label>
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={unboundCtl.aggressive_nsec}
+              onChange={(e) =>
+                setUnboundCtl({ ...unboundCtl, aggressive_nsec: e.target.checked })
+              }
+              disabled={controlsBusy}
+            />
+            aggressive-nsec
+          </label>
+        </div>
+
+        <div className="section-title">BIND (authoritative)</div>
+        <div className="grid">
+          <label>
+            RRL responses/sec
+            <input
+              type="number"
+              min={1}
+              max={1000}
+              value={bindCtl.rrl_responses_per_second}
+              onChange={(e) =>
+                setBindCtl({
+                  ...bindCtl,
+                  rrl_responses_per_second: Number(e.target.value),
+                })
+              }
+              disabled={controlsBusy || !bindCtl.rrl_enabled}
+            />
+          </label>
+          <label>
+            RRL window
+            <input
+              type="number"
+              min={1}
+              max={60}
+              value={bindCtl.rrl_window}
+              onChange={(e) =>
+                setBindCtl({ ...bindCtl, rrl_window: Number(e.target.value) })
+              }
+              disabled={controlsBusy || !bindCtl.rrl_enabled}
+            />
+          </label>
+          <label>
+            RRL slip
+            <input
+              type="number"
+              min={0}
+              max={10}
+              value={bindCtl.rrl_slip}
+              onChange={(e) =>
+                setBindCtl({ ...bindCtl, rrl_slip: Number(e.target.value) })
+              }
+              disabled={controlsBusy || !bindCtl.rrl_enabled}
+            />
+          </label>
+        </div>
+        <div className="toggle-row">
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={bindCtl.rrl_enabled}
+              onChange={(e) =>
+                setBindCtl({ ...bindCtl, rrl_enabled: e.target.checked })
+              }
+              disabled={controlsBusy}
+            />
+            RRL enabled
+          </label>
+          <label className="pill-toggle warning">
+            <input
+              type="checkbox"
+              checked={bindCtl.recursion}
+              onChange={(e) =>
+                setBindCtl({ ...bindCtl, recursion: e.target.checked })
+              }
+              disabled={controlsBusy}
+            />
+            recursion (avoid open resolver)
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={loadControls} disabled={controlsBusy || missingLabKey}>
+            Load Controls
+          </button>
+          <button onClick={applyControls} disabled={controlsBusy || missingLabKey}>
+            Apply Controls
+          </button>
+        </div>
+        <div className="status">{controlsStatus || 'Ready.'}</div>
+      </section>
+      )}
+
+      {isSectionVisible('amplification') && (
+      <section className="card" id="amplification">
+        <div className="card-title">DNSSEC Amplification / EDNS</div>
+        <div className="hint">
+          <div>
+            Compare response sizes, TC bit, TCP fallback, and latency for large
+            DNSSEC responses. Use a zone apex for DNSKEY/RRSIG tests.
+          </div>
+        </div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="grid">
+          <label>
+            Name (zone apex)
+            <input
+              value={ampName}
+              onChange={(e) => setAmpName(e.target.value)}
+              disabled={ampBusy}
+            />
+          </label>
+          <label>
+            Samples per qtype
+            <input
+              type="number"
+              min={1}
+              max={40}
+              value={ampCount}
+              onChange={(e) => setAmpCount(Number(e.target.value))}
+              disabled={ampBusy}
+            />
+          </label>
+        </div>
+        <div className="toggle-row">
+          <div className="toggle-group">
+            <div className="toggle-label">QTYPE</div>
+            {['DNSKEY', 'ANY', 'TXT', 'RRSIG', 'A', 'AAAA', 'SOA'].map((q) => (
+              <label key={q} className="pill-toggle">
+                <input
+                  type="checkbox"
+                  checked={ampQtypes.includes(q)}
+                  onChange={() => toggleAmpQtype(q)}
+                  disabled={ampBusy}
+                />
+                {q}
+              </label>
+            ))}
+          </div>
+          <div className="toggle-group">
+            <div className="toggle-label">EDNS UDP</div>
+            {[1232, 4096].map((size) => (
+              <label key={size} className="pill-toggle">
+                <input
+                  type="checkbox"
+                  checked={ampEdnsSizes.includes(size)}
+                  onChange={() => toggleAmpEdns(size)}
+                  disabled={ampBusy}
+                />
+                {size}
+              </label>
+            ))}
+          </div>
+          <div className="toggle-group">
+            <div className="toggle-label">Options</div>
+            <label className="pill-toggle">
+              <input
+                type="checkbox"
+                checked={ampDnssec}
+                onChange={(e) => setAmpDnssec(e.target.checked)}
+                disabled={ampBusy}
+              />
+              DNSSEC DO
+            </label>
+            <label className="pill-toggle">
+              <input
+                type="checkbox"
+                checked={ampTcpFallback}
+                onChange={(e) => setAmpTcpFallback(e.target.checked)}
+                disabled={ampBusy}
+              />
+              TCP fallback
+            </label>
+          </div>
+        </div>
+        <div className="actions">
+          <button onClick={runAmplificationTest} disabled={ampBusy || missingLabKey}>
+            Run Amplification Test
+          </button>
+        </div>
+        <div className="status">{ampStatus || 'Ready.'}</div>
+        <div className="result-table">
+          <div className="result-row header">
+            <div>EDNS</div>
+            <div>QTYPE</div>
+            <div>TC%</div>
+            <div>TCP%</div>
+            <div>P95 ms</div>
+            <div>UDP avg/max</div>
+            <div>TCP avg/max</div>
+            <div>RCODES</div>
+          </div>
+          {ampResults.length === 0 && (
+            <div className="result-row empty">
+              <div>No results yet.</div>
+            </div>
+          )}
+          {sortedAmpResults.map((row) => (
+            <div key={`${row.edns_size}-${row.qtype}`} className="result-row">
+              <div>{row.edns_size}</div>
+              <div>{row.qtype}</div>
+              <div>{formatPercent(row.tc_rate)}</div>
+              <div>{formatPercent(row.tcp_rate)}</div>
+              <div>{row.p95_latency_ms}</div>
+              <div>
+                {row.avg_udp_size.toFixed(0)} / {row.max_udp_size}
+              </div>
+              <div>
+                {row.avg_tcp_size.toFixed(0)} / {row.max_tcp_size}
+              </div>
+              <div>{formatKeyValues(row.rcode_counts)}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="section-title">Mix Load (80% A/AAAA, 10% NXDOMAIN, 10% DNSKEY)</div>
+        <div className="grid">
+          <label>
+            Zone
+            <input
+              value={mixZone}
+              onChange={(e) => setMixZone(e.target.value)}
+              disabled={mixBusy}
+            />
+          </label>
+          <label>
+            Count
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={mixCount}
+              onChange={(e) => setMixCount(Number(e.target.value))}
+              disabled={mixBusy}
+            />
+          </label>
+          <label>
+            EDNS size
+            <select
+              value={mixEdns}
+              onChange={(e) => setMixEdns(Number(e.target.value))}
+              disabled={mixBusy}
+            >
+              <option value={1232}>1232</option>
+              <option value={4096}>4096</option>
+            </select>
+          </label>
+        </div>
+        <div className="toggle-row">
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={mixDnssec}
+              onChange={(e) => setMixDnssec(e.target.checked)}
+              disabled={mixBusy}
+            />
+            DNSSEC DO
+          </label>
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={mixTcpFallback}
+              onChange={(e) => setMixTcpFallback(e.target.checked)}
+              disabled={mixBusy}
+            />
+            TCP fallback
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={runMixLoad} disabled={mixBusy || missingLabKey}>
+            Run Mix Load
+          </button>
+        </div>
+        <div className="status">{mixStatus || 'Ready.'}</div>
+        <div className="metrics-grid">
+          <div className="metric">
+            <div className="metric-label">P95 latency</div>
+            <div className="metric-value">
+              {mixResult ? `${mixResult.p95_latency_ms} ms` : '—'}
+            </div>
+            <div className="metric-sub">
+              Avg latency: {mixResult ? `${mixResult.avg_latency_ms} ms` : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">TC / TCP</div>
+            <div className="metric-value">
+              {mixResult ? formatPercent(mixResult.tc_rate) : '—'}
+            </div>
+            <div className="metric-sub">
+              TCP: {mixResult ? formatPercent(mixResult.tcp_rate) : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">UDP size</div>
+            <div className="metric-value">
+              {mixResult ? `${mixResult.avg_udp_size.toFixed(0)} B` : '—'}
+            </div>
+            <div className="metric-sub">
+              Max: {mixResult ? `${mixResult.max_udp_size} B` : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">TCP size</div>
+            <div className="metric-value">
+              {mixResult ? `${mixResult.avg_tcp_size.toFixed(0)} B` : '—'}
+            </div>
+            <div className="metric-sub">
+              Max: {mixResult ? `${mixResult.max_tcp_size} B` : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">RCODES</div>
+            <div className="metric-value">{mixResult ? 'mix' : '—'}</div>
+            <div className="metric-sub">
+              {mixResult ? formatKeyValues(mixResult.rcode_counts) : '—'}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">Query mix</div>
+            <div className="metric-value">{mixResult ? '80/10/10' : '—'}</div>
+            <div className="metric-sub">
+              {mixResult ? formatKeyValues(mixResult.query_mix) : '—'}
+            </div>
+          </div>
+        </div>
+      </section>
+      )}
+
+      {isSectionVisible('configs') && (
+      <section className="card" id="configs">
         <div className="card-title">Config Files (Lab API)</div>
         {missingLabKey && (
           <div className="alert">
@@ -1705,24 +4985,115 @@ export default function App() {
             Resolver
           </button>
         </div>
-
-        <div className="config-list">
-          {groupedFiles.length === 0 && (
-            <div className="config-empty">No files loaded yet.</div>
+        <div className="config-server-tabs">
+          {configGroup === 'authoritative' ? (
+            <>
+              <button
+                className={configServer === 'child' ? 'active' : ''}
+                onClick={() => setConfigServer('child')}
+                disabled={isBusy}
+              >
+                Child (bind)
+              </button>
+              <button
+                className={configServer === 'parent' ? 'active' : ''}
+                onClick={() => setConfigServer('parent')}
+                disabled={isBusy}
+              >
+                Parent (bind_parent)
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={configServer === 'resolver' ? 'active' : ''}
+                onClick={() => setConfigServer('resolver')}
+                disabled={isBusy}
+              >
+                Resolver
+              </button>
+              <button
+                className={configServer === 'plain' ? 'active' : ''}
+                onClick={() => setConfigServer('plain')}
+                disabled={isBusy}
+              >
+                Resolver Plain
+              </button>
+            </>
           )}
-          {groupedFiles.map((f) => (
-            <button
-              key={f.path}
-              className={`config-item ${
-                configPath === f.path ? 'active' : ''
-              }`}
-              onClick={() => setConfigPath(f.path)}
-              disabled={isBusy}
-            >
-              <span>{f.path}</span>
-              <span className="config-size">{f.size} B</span>
-            </button>
-          ))}
+        </div>
+
+        <div className="config-layout">
+          <div className="config-pane config-pane-list">
+            <div className="config-toolbar">
+              <input
+                className="config-search"
+                placeholder="Filter files (e.g., named.conf, zones, unbound)"
+                value={configSearch}
+                onChange={(e) => setConfigSearch(e.target.value)}
+                disabled={isBusy}
+              />
+              <div className="config-count">
+                {visibleConfigFiles.length} files
+              </div>
+            </div>
+            <div className="config-list config-scroll">
+              {visibleConfigFiles.length === 0 && (
+                <div className="config-empty">No files loaded yet.</div>
+              )}
+              {visibleConfigFiles.map((f) => (
+                <button
+                  key={f.path}
+                  className={`config-item ${
+                    configPath === f.path ? 'active' : ''
+                  }`}
+                  onClick={() => setConfigPath(f.path)}
+                  disabled={isBusy}
+                >
+                  <span>{f.path}</span>
+                  <span className="config-size">{f.size} B</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="config-pane config-pane-viewer">
+            <div className="config-viewer-header">
+              <div>
+                <div className="config-viewer-title">
+                  {configPath || 'Select a config file'}
+                </div>
+                <div className="config-viewer-meta">
+                  {selectedConfig
+                    ? `${selectedConfig.size} bytes`
+                    : 'No file selected'}
+                </div>
+              </div>
+              <div className="config-viewer-actions">
+                <button onClick={viewConfigFile} disabled={isBusy || !configPath}>
+                  View File
+                </button>
+                <button onClick={exportConfigBundle} disabled={isBusy || !configContent}>
+                  Export Bundle
+                </button>
+              </div>
+            </div>
+            <pre className="output config-output config-viewer">
+              {configContent ? (
+                <code>
+                  {configContent.split('\n').map((line, index) => (
+                    <span key={`${index}-${line}`} className={configLineClass(line)}>
+                      {line}
+                      {'\n'}
+                    </span>
+                  ))}
+                </code>
+              ) : (
+                'No config loaded.'
+              )}
+            </pre>
+            <div className="status">{configStatus || 'Ready.'}</div>
+          </div>
         </div>
 
         <div className="actions">
@@ -1730,17 +5101,14 @@ export default function App() {
             Load Files
           </button>
           <button onClick={viewConfigFile} disabled={isBusy || !configPath}>
-            View File
+            Reload File
           </button>
         </div>
-
-        <div className="status">{configStatus || 'Ready.'}</div>
-        <pre className="output">
-          {configContent || 'No config loaded.'}
-        </pre>
       </section>
+      )}
 
-      <section className="card">
+      {isSectionVisible('capture') && (
+      <section className="card" id="capture">
         <div className="card-title">Packet Capture (Lab API)</div>
         {missingLabKey && (
           <div className="alert">
@@ -1823,6 +5191,7 @@ export default function App() {
           ))}
         </div>
       </section>
+      )}
     </div>
   );
 }

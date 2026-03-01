@@ -1,12 +1,22 @@
 import os
 import re
 import subprocess
+import time
+import threading
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="dns-client-agent", version="1.0.0")
+
+CLIENT_API_KEY = os.getenv("CLIENT_API_KEY", "")
+RATE_LIMIT_PER_MIN = int(os.getenv("CLIENT_RATE_LIMIT_PER_MIN", "120"))
+RATE_LIMIT_WINDOW_S = int(os.getenv("CLIENT_RATE_LIMIT_WINDOW_S", "60"))
+
+_rate_lock = threading.Lock()
+_rate_hits: dict[str, list[float]] = {}
 
 ALLOWED_QTYPES = {
     "A", "AAAA", "CAA", "CNAME", "MX", "NS", "SOA", "SRV", "TXT",
@@ -18,6 +28,58 @@ NAME_RE = re.compile(r"^(?=.{1,253}\.?$)([A-Za-z0-9-]{1,63}\.)+[A-Za-z0-9-]{1,63
 
 # allow IPv4/IPv6/hostnames (basic sanity, not full RFC)
 SERVER_RE = re.compile(r"^[A-Za-z0-9\.\-:]+$")
+
+def _client_ip(request: Request) -> str:
+    return (
+        request.headers.get("x-real-ip")
+        or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
+
+def _rate_limit_check(request: Request) -> Optional[JSONResponse]:
+    if RATE_LIMIT_PER_MIN <= 0:
+        return None
+    path = request.url.path
+    if path in ("/health", "/openapi.json") or path.startswith("/docs"):
+        return None
+    now = time.time()
+    key = _client_ip(request)
+    with _rate_lock:
+        hits = _rate_hits.get(key, [])
+        cutoff = now - RATE_LIMIT_WINDOW_S
+        hits = [ts for ts in hits if ts >= cutoff]
+        if len(hits) >= RATE_LIMIT_PER_MIN:
+            _rate_hits[key] = hits
+            return JSONResponse(
+                status_code=429, content={"detail": "Rate limit exceeded"}
+            )
+        hits.append(now)
+        _rate_hits[key] = hits
+    return None
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    blocked = _rate_limit_check(request)
+    if blocked:
+        return blocked
+    return await call_next(request)
+
+def _extract_bearer(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    parts = authorization.split(None, 1)
+    if len(parts) != 2:
+        return None
+    if parts[0].lower() != "bearer":
+        return None
+    return parts[1].strip()
+
+def require_client_key(x_api_key: Optional[str], authorization: Optional[str]):
+    if not CLIENT_API_KEY:
+        return
+    bearer = _extract_bearer(authorization)
+    if x_api_key != CLIENT_API_KEY and bearer != CLIENT_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
 
 
 def _parse_ad_flag(dig_output: str) -> bool:
@@ -85,7 +147,12 @@ def health() -> Dict[str, Any]:
 
 
 @app.post("/dig", response_model=DigResponse)
-def run_dig(req: DigRequest) -> DigResponse:
+def run_dig(
+    req: DigRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+) -> DigResponse:
+    require_client_key(x_api_key, authorization)
     qtype = req.qtype.upper().strip()
     if qtype not in ALLOWED_QTYPES:
         raise HTTPException(status_code=400, detail=f"Unsupported qtype: {qtype}")

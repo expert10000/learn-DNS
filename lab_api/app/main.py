@@ -1,5 +1,7 @@
 import os
 import re
+import json
+import math
 import subprocess
 import http.client
 import secrets
@@ -7,18 +9,31 @@ import socket
 import ssl
 import struct
 import time
+import threading
+import base64
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
+from urllib.parse import urlencode, urlparse
 
-from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="dns-security-lab API", version="1.0")
 
 API_KEY = os.getenv("LAB_API_KEY", "")
+ALLOW_DOCKER = os.getenv("LAB_API_ALLOW_DOCKER", "0").lower() in ("1", "true", "yes")
+RATE_LIMIT_PER_MIN = int(os.getenv("LAB_API_RATE_LIMIT_PER_MIN", "120"))
+RATE_LIMIT_WINDOW_S = int(os.getenv("LAB_API_RATE_LIMIT_WINDOW_S", "60"))
+AUDIT_LOG_PATH = os.getenv("LAB_API_AUDIT_LOG", "/var/log/lab_api/audit.log")
+AUTH_AGENT_URL = os.getenv("AUTH_AGENT_URL", "")
+RESOLVER_AGENT_URL = os.getenv("RESOLVER_AGENT_URL", "")
+AGENT_API_KEY = os.getenv("AGENT_API_KEY", "")
+
+_rate_lock = threading.Lock()
+_rate_hits: dict[str, list[float]] = {}
 
 cors_origins = [
     origin.strip()
@@ -35,6 +50,126 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+def _agent_request(
+    base_url: str, path: str, params: Optional[dict[str, str | int]] = None
+) -> dict:
+    if not base_url:
+        raise HTTPException(status_code=503, detail="Agent URL not configured")
+    url = urlparse(base_url)
+    host = url.hostname
+    port = url.port or 80
+    if not host:
+        raise HTTPException(status_code=500, detail="Invalid agent URL")
+    query = f"{path}?{urlencode(params)}" if params else path
+    headers = {}
+    if AGENT_API_KEY:
+        headers["x-agent-key"] = AGENT_API_KEY
+    try:
+        conn = http.client.HTTPConnection(host, port, timeout=4)
+        conn.request("GET", query, headers=headers)
+        res = conn.getresponse()
+        data = res.read()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Agent error: {exc}") from exc
+    if res.status >= 400:
+        detail = data.decode("utf-8", errors="replace")
+        raise HTTPException(status_code=res.status, detail=detail)
+    try:
+        return json.loads(data.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail="Agent returned invalid JSON") from exc
+
+def _agent_for_config(path: str) -> Optional[str]:
+    if path.startswith("unbound/"):
+        return RESOLVER_AGENT_URL
+    if path.startswith("bind/") or path.startswith("bind_parent/"):
+        return AUTH_AGENT_URL
+    return None
+
+def _tail_file(path: Path, lines: int) -> str:
+    if lines <= 0:
+        return ""
+    try:
+        with path.open("rb") as f:
+            f.seek(0, os.SEEK_END)
+            end = f.tell()
+            size = end
+            block = 1024
+            data = b""
+            while size > 0 and data.count(b"\n") <= lines:
+                read_size = block if size >= block else size
+                f.seek(size - read_size)
+                data = f.read(read_size) + data
+                size -= read_size
+            return b"\n".join(data.splitlines()[-lines:]).decode(
+                "utf-8", errors="replace"
+            )
+    except Exception:
+        return ""
+
+def _latest_log_file(base: Path) -> Optional[Path]:
+    if not base.exists():
+        return None
+    candidates = sorted(
+        [p for p in base.rglob("*") if p.is_file()],
+        key=lambda p: p.stat().st_size,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+def _client_ip(request: Request) -> str:
+    return (
+        request.headers.get("x-real-ip")
+        or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
+
+def _rate_limit_key(request: Request) -> str:
+    return _client_ip(request)
+
+def _rate_limit_check(request: Request) -> Optional[JSONResponse]:
+    if RATE_LIMIT_PER_MIN <= 0:
+        return None
+    path = request.url.path
+    if path in ("/health", "/openapi.json") or path.startswith("/docs"):
+        return None
+    now = time.time()
+    key = _rate_limit_key(request)
+    with _rate_lock:
+        hits = _rate_hits.get(key, [])
+        cutoff = now - RATE_LIMIT_WINDOW_S
+        hits = [ts for ts in hits if ts >= cutoff]
+        if len(hits) >= RATE_LIMIT_PER_MIN:
+            _rate_hits[key] = hits
+            return JSONResponse(
+                status_code=429, content={"detail": "Rate limit exceeded"}
+            )
+        hits.append(now)
+        _rate_hits[key] = hits
+    return None
+
+def audit_log(request: Request, action: str, detail: dict):
+    try:
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "ip": _client_ip(request),
+            "path": request.url.path,
+            "action": action,
+            "detail": detail,
+        }
+        os.makedirs(os.path.dirname(AUDIT_LOG_PATH), exist_ok=True)
+        with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    blocked = _rate_limit_check(request)
+    if blocked:
+        return blocked
+    return await call_next(request)
 
 # Choose resolver IP by "segment" so Unbound ACLs behave like real clients
 RESOLVER_BY_PROFILE = {
@@ -64,9 +199,9 @@ MAX_CONFIG_BYTES = 200_000
 
 CAPTURE_DIR = Path("/captures")
 CAPTURE_TARGETS = {
-    "resolver": os.getenv("CAPTURE_RESOLVER_CONTAINER", "dns_capture_resolver"),
+    "resolver": os.getenv("CAPTURE_RESOLVER_CONTAINER", "dns_resolver"),
     "authoritative": os.getenv(
-        "CAPTURE_AUTHORITATIVE_CONTAINER", "dns_capture_authoritative"
+        "CAPTURE_AUTHORITATIVE_CONTAINER", "dns_authoritative_child"
     ),
 }
 CAPTURE_FILTERS = {
@@ -94,9 +229,49 @@ SIGNING_CHILD_CONTAINER = os.getenv(
 )
 RESOLVER_CONTAINER = os.getenv("SIGNING_RESOLVER_CONTAINER", "dns_resolver")
 DS_RECOMPUTE_CONTAINER = os.getenv("DS_RECOMPUTE_CONTAINER", "dns_ds_recompute")
+ANCHOR_EXPORT_CONTAINER = os.getenv("ANCHOR_EXPORT_CONTAINER", "dns_anchor_export")
+RESOLVER_PLAIN_CONTAINER = os.getenv(
+    "RESOLVER_PLAIN_CONTAINER", "dns_resolver_plain"
+)
+DS_RECOMPUTE_CONTAINER = os.getenv("DS_RECOMPUTE_CONTAINER", "dns_ds_recompute")
 ANCHOR_EXPORT_CONTAINER = os.getenv(
     "ANCHOR_EXPORT_CONTAINER", "dns_anchor_export"
 )
+CLIENT_TRUSTED_CONTAINER = os.getenv("CLIENT_TRUSTED_CONTAINER", "dns_client")
+CLIENT_UNTRUSTED_CONTAINER = os.getenv("CLIENT_UNTRUSTED_CONTAINER", "dns_untrusted")
+CLIENT_MGMT_CONTAINER = os.getenv("CLIENT_MGMT_CONTAINER", "dns_mgmt_client")
+TOOLBOX_CONTAINER = os.getenv("TOOLBOX_CONTAINER", "dns_toolbox")
+PERF_TOOLS_CONTAINER = os.getenv("PERF_TOOLS_CONTAINER", "dns_perf_tools")
+
+CLIENT_CONTAINER_BY_PROFILE = {
+    "trusted": CLIENT_TRUSTED_CONTAINER,
+    "untrusted": CLIENT_UNTRUSTED_CONTAINER,
+    "mgmt": CLIENT_MGMT_CONTAINER,
+}
+
+MAX_LOAD_COUNT = 600
+MAX_LOAD_QPS = 100
+MAX_FLOOD_QPS = 200
+MAX_FLOOD_OUTSTANDING = 500
+MAX_FLOOD_STEP_SECONDS = 120
+MAX_FLOOD_TOTAL_SECONDS = 600
+MAX_FLOOD_STEPS = 20
+MAX_RRL_COUNT = 800
+MAX_PROBE_COUNT = 30
+MAX_AMP_COUNT = 40
+MAX_MIX_COUNT = 500
+MAX_DNSPERF_QPS = 200
+MAX_DNSPERF_DURATION = 300
+MAX_DNSPERF_QUERIES = 5000
+MAX_DNSPERF_THREADS = 8
+MAX_DNSPERF_CLIENTS = 50
+MAX_RESPERF_MAX_QPS = 300
+MAX_RESPERF_RAMP_QPS = 50
+MAX_RESPERF_CLIENTS = 50
+MAX_RESPERF_QUERIES = 2000
+DEFAULT_PERF_QUERY_FILE = "/work/tests/perf/queries.txt"
+MAX_PERF_QUERY_LINES = 1000
+MAX_PERF_QUERY_CHARS = 20000
 
 class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
@@ -146,6 +321,22 @@ class ConfigFileResponse(BaseModel):
     truncated: bool
     content: str
 
+class AgentAggregateResponse(BaseModel):
+    ok: bool
+    agents: dict
+
+class StartupDiagnosticsResponse(BaseModel):
+    ok: bool
+    issues: list[str]
+    details: dict[str, str]
+
+class MaintenanceResponse(BaseModel):
+    ok: bool
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
 class CaptureStartRequest(BaseModel):
     target: Literal["resolver", "authoritative"]
     filter: Literal["dns", "dns+dot", "all"] = "dns"
@@ -188,6 +379,13 @@ class CaptureSummaryResponse(BaseModel):
     stdout_upstream: str
     stderr_total: str
     stderr_upstream: str
+
+class CaptureHealthResponse(BaseModel):
+    ok: bool
+    target: Literal["resolver", "authoritative"]
+    running: bool
+    pid: Optional[int] = None
+    detail: str = ""
 
 class SigningSwitchRequest(BaseModel):
     mode: Literal["nsec", "nsec3"]
@@ -238,11 +436,329 @@ class PrivacyCheckResponse(BaseModel):
     elapsed_ms: int = 0
     detail: Optional[str] = None
 
+class AmplificationTestRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    name: str = "example.test"
+    qtypes: list[
+        Literal[
+            "DNSKEY",
+            "ANY",
+            "TXT",
+            "RRSIG",
+            "A",
+            "AAAA",
+            "SOA",
+        ]
+    ] = ["DNSKEY", "ANY", "TXT", "RRSIG"]
+    edns_sizes: list[int] = [1232, 4096]
+    count_per_qtype: int = 10
+    dnssec: bool = True
+    tcp_fallback: bool = True
+
+class AmplificationResult(BaseModel):
+    edns_size: int
+    qtype: str
+    count: int
+    rcode_counts: dict[str, int]
+    tc_rate: float
+    tcp_rate: float
+    avg_latency_ms: float
+    p95_latency_ms: int
+    avg_udp_size: float
+    max_udp_size: int
+    avg_tcp_size: float
+    max_tcp_size: int
+
+class AmplificationTestResponse(BaseModel):
+    ok: bool
+    target: str
+    name: str
+    results: list[AmplificationResult]
+
+class AvailabilityMetricsResponse(BaseModel):
+    ok: bool
+    totals: dict[str, int]
+    ratios: dict[str, float]
+    avg_recursion_ms: float
+    raw: str
+
+class ResolverStatsResponse(BaseModel):
+    ok: bool
+    resolver: Literal["valid", "plain"]
+    container: str
+    cpu_pct: Optional[float] = None
+    mem_bytes: Optional[int] = None
+    mem_limit_bytes: Optional[int] = None
+    mem_pct: Optional[float] = None
+
+class AvailabilityProbeRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    name: str = "www.example.test"
+    qtype: Literal[
+        "A",
+        "AAAA",
+        "CAA",
+        "CNAME",
+        "DS",
+        "DNSKEY",
+        "MX",
+        "NS",
+        "NSEC",
+        "NSEC3",
+        "NSEC3PARAM",
+        "RRSIG",
+        "SOA",
+        "SRV",
+        "TXT",
+        "ANY",
+    ] = "A"
+    count: int = 5
+
+class AvailabilityProbeResponse(BaseModel):
+    ok: bool
+    target: str
+    name: str
+    qtype: str
+    count: int
+    min_ms: int
+    max_ms: int
+    avg_ms: int
+    p50_ms: int
+    p95_ms: int
+    rcode_counts: dict[str, int]
+
+class FloodTestRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    name: str = "www.example.test"
+    qtype: Literal[
+        "A",
+        "AAAA",
+        "CAA",
+        "CNAME",
+        "DS",
+        "DNSKEY",
+        "MX",
+        "NS",
+        "NSEC",
+        "NSEC3",
+        "NSEC3PARAM",
+        "RRSIG",
+        "SOA",
+        "SRV",
+        "TXT",
+        "ANY",
+    ] = "A"
+    qps_start: int = 10
+    qps_end: int = 100
+    qps_step: int = 10
+    step_seconds: int = 30
+    max_outstanding: int = 200
+    timeout_ms: int = 1000
+    stop_loss_pct: float = 2.0
+    stop_p95_ms: int = 200
+    stop_servfail_pct: float = 2.0
+    stop_cpu_pct: float = 85.0
+
+class FloodStepResult(BaseModel):
+    step: int
+    qps: int
+    actual_qps: float
+    duration_s: int
+    sent: int
+    responses: int
+    timeouts: int
+    loss_pct: float
+    rcode_counts: dict[str, int]
+    avg_ms: int
+    p95_ms: int
+    max_ms: int
+    servfail_pct: float
+    cpu_pct: Optional[float] = None
+    stop_reason: Optional[str] = None
+
+class FloodTestResponse(BaseModel):
+    ok: bool
+    target: str
+    name: str
+    qtype: str
+    steps: list[FloodStepResult]
+    stopped_early: bool
+    stop_reason: Optional[str] = None
+
+class RrlTestRequest(BaseModel):
+    name: str = "example.test"
+    qtype: Literal[
+        "A",
+        "AAAA",
+        "CAA",
+        "CNAME",
+        "DS",
+        "DNSKEY",
+        "MX",
+        "NS",
+        "NSEC",
+        "NSEC3",
+        "NSEC3PARAM",
+        "RRSIG",
+        "SOA",
+        "SRV",
+        "TXT",
+        "ANY",
+    ] = "A"
+    count: int = 300
+    log_tail: int = 200
+
+class RrlTestResponse(BaseModel):
+    ok: bool
+    rrl_enabled: bool
+    config_excerpt: str
+    log_excerpt: str
+    matches: list[str]
+
+class LoadTestRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    name: str = "www.example.test"
+    qtype: Literal[
+        "A",
+        "AAAA",
+        "CAA",
+        "CNAME",
+        "DS",
+        "DNSKEY",
+        "MX",
+        "NS",
+        "NSEC",
+        "NSEC3",
+        "NSEC3PARAM",
+        "RRSIG",
+        "SOA",
+        "SRV",
+        "TXT",
+        "ANY",
+    ] = "A"
+    count: int = 200
+    qps: int = 20
+
+class MixLoadRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    zone: str = "example.test"
+    count: int = 200
+    edns_size: int = 1232
+    dnssec: bool = True
+    tcp_fallback: bool = True
+
+class MixLoadResponse(BaseModel):
+    ok: bool
+    target: str
+    count: int
+    edns_size: int
+    rcode_counts: dict[str, int]
+    query_mix: dict[str, int]
+    tc_rate: float
+    tcp_rate: float
+    avg_latency_ms: float
+    p95_latency_ms: int
+    avg_udp_size: float
+    max_udp_size: int
+    avg_tcp_size: float
+    max_tcp_size: int
+
+class DnsperfRequest(BaseModel):
+    target: Literal[
+        "resolver_valid",
+        "resolver_plain",
+        "authoritative_parent",
+        "authoritative_child",
+    ] = "resolver_valid"
+    duration_s: int = 20
+    qps: int = 50
+    max_queries: int = 500
+    threads: int = 2
+    clients: int = 2
+    queries: Optional[str] = None
+
+class DnsperfSummary(BaseModel):
+    queries_sent: Optional[int] = None
+    queries_completed: Optional[int] = None
+    queries_lost: Optional[int] = None
+    qps: Optional[float] = None
+    avg_latency_ms: Optional[float] = None
+    min_latency_ms: Optional[float] = None
+    max_latency_ms: Optional[float] = None
+
+class DnsperfResponse(BaseModel):
+    ok: bool
+    target: str
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    summary: Optional[DnsperfSummary] = None
+
+class ResperfRequest(BaseModel):
+    target: Literal[
+        "resolver_valid",
+        "resolver_plain",
+        "authoritative_parent",
+        "authoritative_child",
+    ] = "resolver_valid"
+    max_qps: int = 200
+    ramp_qps: int = 15
+    clients: int = 15
+    queries_per_step: int = 200
+    plot_file: Optional[str] = None
+    queries: Optional[str] = None
+
+class ResperfResponse(BaseModel):
+    ok: bool
+    target: str
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    plot_file: Optional[str] = None
+
+class UnboundControls(BaseModel):
+    ratelimit: int
+    ip_ratelimit: int
+    unwanted_reply_threshold: int
+    serve_expired: bool
+    serve_expired_ttl: int
+    prefetch: bool
+    msg_cache_size: str
+    rrset_cache_size: str
+    aggressive_nsec: bool
+
+class BindControls(BaseModel):
+    rrl_enabled: bool
+    rrl_responses_per_second: int
+    rrl_window: int
+    rrl_slip: int
+    recursion: bool
+
+class ControlsStatusResponse(BaseModel):
+    ok: bool
+    unbound: UnboundControls
+    bind: BindControls
+
+class ControlsUpdateRequest(BaseModel):
+    unbound: Optional[UnboundControls] = None
+    bind: Optional[BindControls] = None
+
 def require_key(x_api_key: Optional[str]):
     if not API_KEY:
         raise HTTPException(status_code=500, detail="Server missing LAB_API_KEY env")
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
+
+def require_docker():
+    if not ALLOW_DOCKER:
+        raise HTTPException(status_code=503, detail="Docker access disabled")
 
 def validate_name(name: str) -> str:
     name = name.strip()
@@ -269,8 +785,126 @@ def run_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
             stderr=(e.stderr or "") + "\nTIMEOUT",
         )
 
+def perf_target_ip(target: str) -> str:
+    targets = {
+        "resolver_valid": "172.32.0.20",
+        "resolver_plain": "172.32.0.21",
+        "authoritative_parent": "172.31.0.10",
+        "authoritative_child": "172.31.0.11",
+    }
+    if target not in targets:
+        raise HTTPException(status_code=400, detail="Invalid perf target")
+    return targets[target]
+
+def sanitize_perf_queries(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    if len(raw) > MAX_PERF_QUERY_CHARS:
+        raise HTTPException(status_code=400, detail="Query list too large")
+    lines: list[str] = []
+    for line in raw.splitlines():
+        clean = line.strip()
+        if not clean or clean.startswith("#") or clean.startswith(";"):
+            continue
+        lines.append(clean)
+        if len(lines) > MAX_PERF_QUERY_LINES:
+            raise HTTPException(status_code=400, detail="Too many query lines")
+    if not lines:
+        return None
+    return "\n".join(lines) + "\n"
+
+def write_perf_queries(container: str, content: str) -> str:
+    token = secrets.token_hex(4)
+    path = f"/tmp/perf_queries_{token}.txt"
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    cmd = f"printf '%s' '{encoded}' | base64 -d > {path}"
+    res = docker_exec(container, cmd, timeout_s=6)
+    if not res.ok:
+        raise HTTPException(status_code=500, detail="Failed to stage perf queries")
+    return path
+
+def sanitize_plot_name(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    clean = name.strip()
+    if not clean:
+        return None
+    if "/" in clean or "\\" in clean or ".." in clean:
+        raise HTTPException(status_code=400, detail="Invalid plot file name")
+    if not re.match(r"^[A-Za-z0-9._-]+$", clean):
+        raise HTTPException(status_code=400, detail="Invalid plot file name")
+    return clean
+
+def parse_dnsperf_summary(output: str) -> Optional[DnsperfSummary]:
+    if not output:
+        return None
+    summary = DnsperfSummary()
+    int_fields = {
+        "queries_sent": r"Queries sent:\s+(\d+)",
+        "queries_completed": r"Queries completed:\s+(\d+)",
+        "queries_lost": r"Queries lost:\s+(\d+)",
+    }
+    for key, pattern in int_fields.items():
+        match = re.search(pattern, output, re.IGNORECASE)
+        if match:
+            setattr(summary, key, int(match.group(1)))
+    float_fields = {
+        "qps": r"Queries per second:\s+([0-9.]+)",
+        "avg_latency_ms": r"Average latency:\s+([0-9.]+)\s*ms",
+    }
+    for key, pattern in float_fields.items():
+        match = re.search(pattern, output, re.IGNORECASE)
+        if match:
+            setattr(summary, key, float(match.group(1)))
+    avg_latency_seconds = re.search(
+        r"Average Latency\s*\(s\):\s*([0-9.]+)",
+        output,
+        re.IGNORECASE,
+    )
+    if avg_latency_seconds:
+        summary.avg_latency_ms = float(avg_latency_seconds.group(1)) * 1000.0
+    minmax = re.search(
+        r"Latency Min/Max:\s+([0-9.]+)\s*/\s*([0-9.]+)\s*ms",
+        output,
+        re.IGNORECASE,
+    )
+    if minmax:
+        summary.min_latency_ms = float(minmax.group(1))
+        summary.max_latency_ms = float(minmax.group(2))
+    minmax_seconds = re.search(
+        r"Average Latency\s*\(s\):\s*[0-9.]+\s*\(min\s*([0-9.]+),\s*max\s*([0-9.]+)\)",
+        output,
+        re.IGNORECASE,
+    )
+    if minmax_seconds:
+        summary.min_latency_ms = float(minmax_seconds.group(1)) * 1000.0
+        summary.max_latency_ms = float(minmax_seconds.group(2)) * 1000.0
+    if any(
+        getattr(summary, field) is not None
+        for field in summary.model_fields.keys()
+    ):
+        return summary
+    return None
+
 def _dns_qtype(value: str) -> int:
-    return {"A": 1, "AAAA": 28}[value]
+    return {
+        "A": 1,
+        "AAAA": 28,
+        "CAA": 257,
+        "CNAME": 5,
+        "DS": 43,
+        "DNSKEY": 48,
+        "MX": 15,
+        "NS": 2,
+        "NSEC": 47,
+        "NSEC3": 50,
+        "NSEC3PARAM": 51,
+        "RRSIG": 46,
+        "SOA": 6,
+        "SRV": 33,
+        "TXT": 16,
+        "ANY": 255,
+    }[value]
 
 def _encode_name(name: str) -> bytes:
     labels = name.strip().rstrip(".").split(".") if name.strip() else []
@@ -288,15 +922,27 @@ def _encode_name(name: str) -> bytes:
     out.append(0)
     return bytes(out)
 
-def _build_query(name: str, qtype: str) -> tuple[int, bytes]:
+def _build_query(
+    name: str, qtype: str, edns_size: Optional[int] = None, dnssec: bool = False
+) -> tuple[int, bytes]:
     qid = secrets.randbelow(65535)
     flags = 0x0100
     qdcount = 1
-    header = struct.pack("!HHHHHH", qid, flags, qdcount, 0, 0, 0)
+    arcount = 0
+    if edns_size is None and dnssec:
+        edns_size = 1232
+    if edns_size:
+        arcount = 1
+    header = struct.pack("!HHHHHH", qid, flags, qdcount, 0, 0, arcount)
     qname = _encode_name(name)
     qtype_id = _dns_qtype(qtype)
     question = qname + struct.pack("!HH", qtype_id, 1)
-    return qid, header + question
+    additional = b""
+    if edns_size:
+        do_flag = 0x8000 if dnssec else 0x0000
+        ttl = do_flag
+        additional = b"\x00" + struct.pack("!HHIH", 41, edns_size, ttl, 0)
+    return qid, header + question + additional
 
 def _parse_rcode(response: bytes) -> Optional[str]:
     if len(response) < 4:
@@ -311,6 +957,285 @@ def _parse_rcode(response: bytes) -> Optional[str]:
         4: "NOTIMP",
         5: "REFUSED",
     }.get(rcode, f"RCODE={rcode}")
+
+def _parse_tc(response: bytes) -> bool:
+    if len(response) < 4:
+        return False
+    flags = struct.unpack("!H", response[2:4])[0]
+    return bool(flags & 0x0200)
+
+def _udp_query(
+    server: str,
+    name: str,
+    qtype: str,
+    edns_size: Optional[int] = None,
+    dnssec: bool = False,
+) -> tuple[int, Optional[str], int, bool]:
+    _, query = _build_query(name, qtype, edns_size=edns_size, dnssec=dnssec)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(2)
+    start = time.perf_counter()
+    try:
+        sock.sendto(query, (server, 53))
+        response, _ = sock.recvfrom(4096)
+    finally:
+        sock.close()
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    rcode = _parse_rcode(response)
+    tc = _parse_tc(response)
+    return elapsed_ms, rcode, len(response), tc
+
+def _tcp_query(
+    server: str,
+    name: str,
+    qtype: str,
+    edns_size: Optional[int] = None,
+    dnssec: bool = False,
+) -> tuple[int, Optional[str], int, bool]:
+    _, query = _build_query(name, qtype, edns_size=edns_size, dnssec=dnssec)
+    start = time.perf_counter()
+    with socket.create_connection((server, 53), timeout=3) as sock:
+        sock.settimeout(3)
+        sock.sendall(struct.pack("!H", len(query)) + query)
+        head = sock.recv(2)
+        if len(head) != 2:
+            raise TimeoutError("Short TCP response")
+        resp_len = struct.unpack("!H", head)[0]
+        response = bytearray()
+        while len(response) < resp_len:
+            chunk = sock.recv(resp_len - len(response))
+            if not chunk:
+                break
+            response.extend(chunk)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    rcode = _parse_rcode(bytes(response))
+    tc = _parse_tc(bytes(response))
+    return elapsed_ms, rcode, len(response), tc
+
+def _p95(values: list[int]) -> int:
+    if not values:
+        return 0
+    items = sorted(values)
+    idx = int((len(items) - 1) * 0.95)
+    return int(items[idx])
+
+def _parse_unbound_stats(raw: str) -> dict[str, float]:
+    stats: dict[str, float] = {}
+    for line in raw.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        try:
+            if "." in value:
+                stats[key] = float(value)
+            else:
+                stats[key] = float(int(value))
+        except ValueError:
+            continue
+    return stats
+
+def _pick_stat(stats: dict[str, float], keys: list[str]) -> float:
+    for key in keys:
+        if key in stats:
+            return stats[key]
+    return 0.0
+
+UNBOUND_CONFIGS = [
+    Path("/config/unbound/unbound.conf"),
+    Path("/config/unbound/unbound.plain.conf"),
+]
+BIND_CONFIGS = [
+    Path("/config/bind/named.conf"),
+    Path("/config/bind_parent/named.conf"),
+]
+
+def _read_text(path: Path) -> str:
+    if not path.exists():
+        raise HTTPException(status_code=500, detail=f"Missing config: {path}")
+    return path.read_text(encoding="utf-8", errors="replace")
+
+def _write_text(path: Path, data: str):
+    path.write_text(data, encoding="utf-8", newline="\n")
+
+def _parse_unbound_value(lines: list[str], key: str) -> Optional[str]:
+    for line in lines:
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        if raw.lower().startswith(f"{key}:"):
+            return raw.split(":", 1)[1].strip()
+    return None
+
+def _parse_bool(value: Optional[str]) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in ("yes", "true", "1", "on")
+
+def _parse_int(value: Optional[str]) -> int:
+    if value is None:
+        return 0
+    try:
+        return int(value.strip())
+    except ValueError:
+        return 0
+
+def _parse_unbound_config(text: str) -> UnboundControls:
+    lines = text.splitlines()
+    return UnboundControls(
+        ratelimit=_parse_int(_parse_unbound_value(lines, "ratelimit")),
+        ip_ratelimit=_parse_int(_parse_unbound_value(lines, "ip-ratelimit")),
+        unwanted_reply_threshold=_parse_int(
+            _parse_unbound_value(lines, "unwanted-reply-threshold")
+        ),
+        serve_expired=_parse_bool(_parse_unbound_value(lines, "serve-expired")),
+        serve_expired_ttl=_parse_int(
+            _parse_unbound_value(lines, "serve-expired-ttl")
+        ),
+        prefetch=_parse_bool(_parse_unbound_value(lines, "prefetch")),
+        msg_cache_size=_parse_unbound_value(lines, "msg-cache-size") or "",
+        rrset_cache_size=_parse_unbound_value(lines, "rrset-cache-size") or "",
+        aggressive_nsec=_parse_bool(_parse_unbound_value(lines, "aggressive-nsec")),
+    )
+
+def _upsert_unbound_line(lines: list[str], key: str, value: str) -> list[str]:
+    pattern = re.compile(rf"^(\s*){re.escape(key)}\s*:\s*.*$", re.IGNORECASE)
+    for idx, line in enumerate(lines):
+        match = pattern.match(line)
+        if match:
+            indent = match.group(1) or "  "
+            lines[idx] = f"{indent}{key}: {value}"
+            return lines
+    # Insert after server: if present, else append
+    for idx, line in enumerate(lines):
+        if line.strip().lower() == "server:":
+            lines.insert(idx + 1, f"  {key}: {value}")
+            return lines
+    lines.append(f"  {key}: {value}")
+    return lines
+
+def _apply_unbound_config(text: str, cfg: UnboundControls) -> str:
+    lines = text.splitlines()
+    lines = _upsert_unbound_line(lines, "ratelimit", str(cfg.ratelimit))
+    lines = _upsert_unbound_line(lines, "ip-ratelimit", str(cfg.ip_ratelimit))
+    lines = _upsert_unbound_line(
+        lines, "unwanted-reply-threshold", str(cfg.unwanted_reply_threshold)
+    )
+    lines = _upsert_unbound_line(
+        lines, "serve-expired", "yes" if cfg.serve_expired else "no"
+    )
+    lines = _upsert_unbound_line(
+        lines, "serve-expired-ttl", str(cfg.serve_expired_ttl)
+    )
+    lines = _upsert_unbound_line(
+        lines, "prefetch", "yes" if cfg.prefetch else "no"
+    )
+    if cfg.msg_cache_size:
+        lines = _upsert_unbound_line(lines, "msg-cache-size", cfg.msg_cache_size)
+    if cfg.rrset_cache_size:
+        lines = _upsert_unbound_line(lines, "rrset-cache-size", cfg.rrset_cache_size)
+    lines = _upsert_unbound_line(
+        lines, "aggressive-nsec", "yes" if cfg.aggressive_nsec else "no"
+    )
+    return "\n".join(lines) + "\n"
+
+def _parse_bind_config(text: str) -> BindControls:
+    recursion_match = re.search(r"^\s*recursion\s+(yes|no)\s*;", text, re.M)
+    recursion = recursion_match.group(1).lower() == "yes" if recursion_match else False
+    rrl_block = re.search(r"rate-limit\s*\{([\s\S]*?)\};", text, re.M)
+    rrl_enabled = rrl_block is not None
+    rps = 0
+    window = 0
+    slip = 0
+    if rrl_block:
+        block = rrl_block.group(1)
+        m = re.search(r"responses-per-second\s+(\d+)\s*;", block)
+        if m:
+            rps = int(m.group(1))
+        m = re.search(r"window\s+(\d+)\s*;", block)
+        if m:
+            window = int(m.group(1))
+        m = re.search(r"slip\s+(\d+)\s*;", block)
+        if m:
+            slip = int(m.group(1))
+    return BindControls(
+        rrl_enabled=rrl_enabled,
+        rrl_responses_per_second=rps or 20,
+        rrl_window=window or 5,
+        rrl_slip=slip or 2,
+        recursion=recursion,
+    )
+
+def _apply_bind_config(text: str, cfg: BindControls) -> str:
+    # Update recursion
+    if re.search(r"^\s*recursion\s+(yes|no)\s*;", text, re.M):
+        text = re.sub(
+            r"^\s*recursion\s+(yes|no)\s*;",
+            f"  recursion {'yes' if cfg.recursion else 'no'};",
+            text,
+            flags=re.M,
+        )
+    else:
+        text = re.sub(
+            r"(options\s*\{)",
+            rf"\1\n  recursion {'yes' if cfg.recursion else 'no'};",
+            text,
+            count=1,
+        )
+
+    allow_recursion = "any" if cfg.recursion else "none"
+    if re.search(r"^\s*allow-recursion\s+\{.*\};", text, re.M):
+        text = re.sub(
+            r"^\s*allow-recursion\s+\{.*\};",
+            f"  allow-recursion {{ {allow_recursion}; }};",
+            text,
+            flags=re.M,
+        )
+    else:
+        text = re.sub(
+            r"(options\s*\{)",
+            rf"\1\n  allow-recursion {{ {allow_recursion}; }};",
+            text,
+            count=1,
+        )
+
+    if re.search(r"^\s*allow-query-cache\s+\{.*\};", text, re.M):
+        text = re.sub(
+            r"^\s*allow-query-cache\s+\{.*\};",
+            f"  allow-query-cache {{ {allow_recursion}; }};",
+            text,
+            flags=re.M,
+        )
+    else:
+        text = re.sub(
+            r"(options\s*\{)",
+            rf"\1\n  allow-query-cache {{ {allow_recursion}; }};",
+            text,
+            count=1,
+        )
+
+    # Remove existing rate-limit block
+    text = re.sub(r"\n\s*rate-limit\s*\{[\s\S]*?\};", "", text, count=1)
+
+    if cfg.rrl_enabled:
+        block = (
+            "\n  rate-limit {\n"
+            f"    responses-per-second {cfg.rrl_responses_per_second};\n"
+            f"    window {cfg.rrl_window};\n"
+            f"    slip {cfg.rrl_slip};\n"
+            "  };\n"
+        )
+        if "minimal-responses yes;" in text:
+            text = text.replace("minimal-responses yes;", "minimal-responses yes;" + block)
+        else:
+            text = re.sub(r"(options\s*\{)", rf"\1{block}", text, count=1)
+
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
 
 def _dot_query(name: str, qtype: str) -> tuple[int, Optional[str], str, int]:
     qid, query = _build_query(name, qtype)
@@ -385,8 +1310,23 @@ def resolve_config_path(rel_path: str) -> Path:
             continue
     raise HTTPException(status_code=403, detail="Path not allowed")
 
+def docker_exec_user(
+    container: str,
+    sh_cmd: str,
+    user: Optional[str] = None,
+    timeout_s: int = 8,
+) -> CmdResponse:
+    cmd = ["docker", "exec"]
+    if user:
+        cmd.extend(["-u", str(user)])
+    cmd.extend([container, "sh", "-lc", sh_cmd])
+    return run_cmd(cmd, timeout_s)
+
 def docker_exec(container: str, sh_cmd: str, timeout_s: int = 8) -> CmdResponse:
-    return run_cmd(["docker", "exec", container, "sh", "-lc", sh_cmd], timeout_s)
+    return docker_exec_user(container, sh_cmd, None, timeout_s)
+
+def docker_exec_root(container: str, sh_cmd: str, timeout_s: int = 8) -> CmdResponse:
+    return docker_exec_user(container, sh_cmd, "0", timeout_s)
 
 def docker_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
     return run_cmd(["docker", *args], timeout_s)
@@ -419,14 +1359,14 @@ def capture_running(target: Literal["resolver", "authoritative"]) -> bool:
         "if kill -0 $pid >/dev/null 2>&1; then echo RUNNING; else echo STALE; fi; "
         "fi"
     )
-    result = docker_exec(container, check_cmd)
+    result = docker_exec_root(container, check_cmd)
     if result.exit_code != 0:
         raise HTTPException(
             status_code=500,
             detail=result.stderr or f"Failed to check capture on {target}",
         )
     if "STALE" in result.stdout:
-        docker_exec(container, f"rm -f {pid_path}")
+        docker_exec_root(container, f"rm -f {pid_path}")
         return False
     return "RUNNING" in result.stdout
 
@@ -443,6 +1383,84 @@ def parse_count(value: str) -> int:
     except ValueError:
         return -1
 
+def _tail_bind_log(tail: int) -> str:
+    if AUTH_AGENT_URL:
+        data = _agent_request(AUTH_AGENT_URL, "/logs", {"scope": "bind", "tail": tail})
+        return data.get("stdout", "")
+    base = Path("/logs/bind")
+    log = _latest_log_file(base)
+    if not log:
+        return ""
+    return _tail_file(log, tail)
+
+def _extract_rrl_block(text: str) -> str:
+    match = re.search(r"\n\s*rate-limit\s*\{[\s\S]*?\};", text, re.M)
+    return match.group(0).strip() if match else ""
+
+def _resolver_container(kind: Literal["valid", "plain"]) -> str:
+    return RESOLVER_CONTAINER if kind == "valid" else RESOLVER_PLAIN_CONTAINER
+
+def _resolver_cpu_pct(container: str) -> Optional[float]:
+    res = docker_cmd(
+        ["stats", "--no-stream", "--format", "{{.CPUPerc}}", container],
+        timeout_s=6,
+    )
+    if res.exit_code != 0:
+        return None
+    raw = res.stdout.strip().replace("%", "")
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
+
+def _percentile(values: list[int], pct: float) -> int:
+    if not values:
+        return 0
+    ordered = sorted(values)
+    idx = int(math.ceil(pct * len(ordered))) - 1
+    idx = max(0, min(idx, len(ordered) - 1))
+    return ordered[idx]
+
+def _parse_mem_bytes(value: str) -> Optional[int]:
+    raw = value.strip()
+    if not raw:
+        return None
+    match = re.match(r"([0-9.]+)\s*([A-Za-z]+)", raw)
+    if not match:
+        return None
+    num = float(match.group(1))
+    unit = match.group(2).lower()
+    units = {
+        "b": 1,
+        "kb": 1000,
+        "kib": 1024,
+        "mb": 1000**2,
+        "mib": 1024**2,
+        "gb": 1000**3,
+        "gib": 1024**3,
+        "tb": 1000**4,
+        "tib": 1024**4,
+    }
+    factor = units.get(unit)
+    if not factor:
+        return None
+    return int(num * factor)
+
+def _resolver_mem_stats(container: str) -> tuple[Optional[int], Optional[int]]:
+    res = docker_cmd(
+        ["stats", "--no-stream", "--format", "{{.MemUsage}}", container],
+        timeout_s=6,
+    )
+    if res.exit_code != 0:
+        return None, None
+    raw = res.stdout.strip()
+    if "/" not in raw:
+        return None, None
+    used_raw, limit_raw = [part.strip() for part in raw.split("/", 1)]
+    return _parse_mem_bytes(used_raw), _parse_mem_bytes(limit_raw)
+
 def ensure_capture_dir():
     if not CAPTURE_DIR.exists():
         raise HTTPException(status_code=500, detail="Capture directory not mounted")
@@ -450,6 +1468,929 @@ def ensure_capture_dir():
 @app.get("/health")
 def health():
     return {"ok": True}
+
+@app.get("/controls/status", response_model=ControlsStatusResponse)
+def controls_status(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    unbound_text = _read_text(UNBOUND_CONFIGS[0])
+    bind_text = _read_text(BIND_CONFIGS[0])
+    return ControlsStatusResponse(
+        ok=True,
+        unbound=_parse_unbound_config(unbound_text),
+        bind=_parse_bind_config(bind_text),
+    )
+
+@app.post("/controls/apply", response_model=ControlsStatusResponse)
+def controls_apply(
+    req: ControlsUpdateRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+    unbound_cfg = req.unbound
+    bind_cfg = req.bind
+
+    if unbound_cfg:
+        for path in UNBOUND_CONFIGS:
+            text = _read_text(path)
+            _write_text(path, _apply_unbound_config(text, unbound_cfg))
+        docker_cmd(
+            ["restart", RESOLVER_CONTAINER, RESOLVER_PLAIN_CONTAINER], timeout_s=20
+        )
+
+    if bind_cfg:
+        for path in BIND_CONFIGS:
+            text = _read_text(path)
+            _write_text(path, _apply_bind_config(text, bind_cfg))
+        docker_cmd(
+            ["restart", SIGNING_PARENT_CONTAINER, SIGNING_CHILD_CONTAINER], timeout_s=20
+        )
+
+    unbound_text = _read_text(UNBOUND_CONFIGS[0])
+    bind_text = _read_text(BIND_CONFIGS[0])
+    if request:
+        audit_log(
+            request,
+            "controls_apply",
+            {
+                "unbound": bool(unbound_cfg),
+                "bind": bool(bind_cfg),
+            },
+        )
+    return ControlsStatusResponse(
+        ok=True,
+        unbound=_parse_unbound_config(unbound_text),
+        bind=_parse_bind_config(bind_text),
+    )
+
+@app.get("/availability/metrics", response_model=AvailabilityMetricsResponse)
+def availability_metrics(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    require_docker()
+    res = docker_exec(
+        RESOLVER_CONTAINER,
+        "/opt/unbound/sbin/unbound-control -c /opt/unbound/etc/unbound/unbound.conf stats_noreset",
+        timeout_s=8,
+    )
+    if res.exit_code != 0:
+        raise HTTPException(status_code=502, detail=res.stderr or "Failed to read stats")
+
+    stats = _parse_unbound_stats(res.stdout)
+    total_queries = int(
+        _pick_stat(stats, ["total.num.queries", "num.queries", "num.query"])
+    )
+    cache_hits = int(_pick_stat(stats, ["total.num.cachehits", "num.cachehits"]))
+    cache_miss = int(_pick_stat(stats, ["total.num.cachemiss", "num.cachemiss"]))
+    nxdomain = int(
+        _pick_stat(stats, ["total.num.query.rcode.NXDOMAIN", "num.query.rcode.NXDOMAIN"])
+    )
+    servfail = int(
+        _pick_stat(stats, ["total.num.query.rcode.SERVFAIL", "num.query.rcode.SERVFAIL"])
+    )
+    ip_ratelimited = int(
+        _pick_stat(
+            stats,
+            ["total.num.queries_ip_ratelimited", "num.queries_ip_ratelimited"],
+        )
+    )
+    ratelimited = int(
+        _pick_stat(stats, ["total.num.queries_ratelimited", "num.queries_ratelimited"])
+    )
+    avg_recursion = _pick_stat(
+        stats,
+        ["total.recursion.time.avg", "recursion.time.avg"],
+    )
+
+    denom = max(total_queries, 1)
+    ratios = {
+        "nxdomain": nxdomain / denom,
+        "servfail": servfail / denom,
+        "cache_hit": cache_hits / max(cache_hits + cache_miss, 1),
+        "ratelimited": ratelimited / denom,
+        "ip_ratelimited": ip_ratelimited / denom,
+    }
+    totals = {
+        "queries": total_queries,
+        "cache_hits": cache_hits,
+        "cache_miss": cache_miss,
+        "nxdomain": nxdomain,
+        "servfail": servfail,
+        "ratelimited": ratelimited,
+        "ip_ratelimited": ip_ratelimited,
+    }
+    return AvailabilityMetricsResponse(
+        ok=True,
+        totals=totals,
+        ratios=ratios,
+        avg_recursion_ms=round(avg_recursion * 1000, 2),
+        raw=res.stdout,
+    )
+
+@app.get("/availability/resolver-stats", response_model=ResolverStatsResponse)
+def availability_resolver_stats(
+    resolver: Literal["valid", "plain"] = "valid",
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+    require_docker()
+    container = _resolver_container(resolver)
+    cpu_pct = _resolver_cpu_pct(container)
+    mem_bytes, mem_limit_bytes = _resolver_mem_stats(container)
+    mem_pct = None
+    if mem_bytes is not None and mem_limit_bytes:
+        mem_pct = round(mem_bytes / mem_limit_bytes * 100.0, 2)
+    return ResolverStatsResponse(
+        ok=True,
+        resolver=resolver,
+        container=container,
+        cpu_pct=cpu_pct,
+        mem_bytes=mem_bytes,
+        mem_limit_bytes=mem_limit_bytes,
+        mem_pct=mem_pct,
+    )
+
+@app.post("/availability/probe", response_model=AvailabilityProbeResponse)
+def availability_probe(
+    req: AvailabilityProbeRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    if req.count < 1 or req.count > MAX_PROBE_COUNT:
+        raise HTTPException(status_code=400, detail="Invalid count")
+
+    name = validate_name(req.name)
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+    timings: list[int] = []
+    rcode_counts: dict[str, int] = {}
+
+    for _ in range(req.count):
+        elapsed_ms, rcode, _, _ = _udp_query(resolver_ip, name, req.qtype)
+        timings.append(elapsed_ms)
+        if rcode:
+            rcode_counts[rcode] = rcode_counts.get(rcode, 0) + 1
+
+    if not timings:
+        raise HTTPException(status_code=500, detail="Probe failed")
+
+    return AvailabilityProbeResponse(
+        ok=True,
+        target=f"{req.profile}/{req.resolver}@{resolver_ip}",
+        name=name,
+        qtype=req.qtype,
+        count=req.count,
+        min_ms=min(timings),
+        max_ms=max(timings),
+        avg_ms=int(sum(timings) / len(timings)),
+        p50_ms=_percentile(timings, 0.50),
+        p95_ms=_percentile(timings, 0.95),
+        rcode_counts=rcode_counts,
+    )
+
+@app.post("/availability/load", response_model=CmdResponse)
+def availability_load(
+    req: LoadTestRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    require_docker()
+    if req.count < 1 or req.count > MAX_LOAD_COUNT:
+        raise HTTPException(status_code=400, detail="Invalid count")
+    if req.qps < 1 or req.qps > MAX_LOAD_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps")
+
+    name = validate_name(req.name)
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+    client_container = CLIENT_CONTAINER_BY_PROFILE[req.profile]
+    sleep_s = 1.0 / req.qps
+
+    if sleep_s <= 0:
+        loop_cmd = (
+            f"for i in $(seq 1 {req.count}); do "
+            f"dig @{resolver_ip} {name} {req.qtype} +time=1 +tries=1 >/dev/null; "
+            "done"
+        )
+    else:
+        loop_cmd = (
+            f"for i in $(seq 1 {req.count}); do "
+            f"dig @{resolver_ip} {name} {req.qtype} +time=1 +tries=1 >/dev/null; "
+            f"sleep {sleep_s:.3f}; "
+            "done"
+        )
+
+    timeout_s = min(60, int((req.count / req.qps) + 10))
+    return docker_exec(client_container, loop_cmd, timeout_s=timeout_s)
+
+@app.post("/perf/dnsperf", response_model=DnsperfResponse)
+def perf_dnsperf(
+    req: DnsperfRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+    if req.duration_s < 1 or req.duration_s > MAX_DNSPERF_DURATION:
+        raise HTTPException(status_code=400, detail="Invalid duration_s")
+    if req.qps < 1 or req.qps > MAX_DNSPERF_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps")
+    if req.max_queries < 1 or req.max_queries > MAX_DNSPERF_QUERIES:
+        raise HTTPException(status_code=400, detail="Invalid max_queries")
+    if req.threads < 1 or req.threads > MAX_DNSPERF_THREADS:
+        raise HTTPException(status_code=400, detail="Invalid threads")
+    if req.clients < 1 or req.clients > MAX_DNSPERF_CLIENTS:
+        raise HTTPException(status_code=400, detail="Invalid clients")
+
+    ensure = ensure_running(PERF_TOOLS_CONTAINER)
+    if ensure.exit_code != 0:
+        raise HTTPException(status_code=500, detail="perf_tools container not running")
+
+    target_ip = perf_target_ip(req.target)
+    queries = sanitize_perf_queries(req.queries)
+    query_file = (
+        write_perf_queries(PERF_TOOLS_CONTAINER, queries)
+        if queries
+        else DEFAULT_PERF_QUERY_FILE
+    )
+    cmd = (
+        f"dnsperf -s {target_ip} -d {query_file} -l {req.duration_s} "
+        f"-Q {req.qps} -q {req.max_queries} -T {req.threads} -c {req.clients}"
+    )
+    timeout_s = min(600, max(20, req.duration_s + 20))
+    res = docker_exec(PERF_TOOLS_CONTAINER, cmd, timeout_s=timeout_s)
+    summary = parse_dnsperf_summary(res.stdout or "")
+    if request:
+        audit_log(
+            request,
+            "perf_dnsperf",
+            {
+                "target": req.target,
+                "duration_s": req.duration_s,
+                "qps": req.qps,
+                "max_queries": req.max_queries,
+                "ok": res.ok,
+            },
+        )
+    return DnsperfResponse(
+        ok=res.ok,
+        target=target_ip,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+        summary=summary,
+    )
+
+@app.post("/perf/resperf", response_model=ResperfResponse)
+def perf_resperf(
+    req: ResperfRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+    if req.max_qps < 1 or req.max_qps > MAX_RESPERF_MAX_QPS:
+        raise HTTPException(status_code=400, detail="Invalid max_qps")
+    if req.ramp_qps < 1 or req.ramp_qps > MAX_RESPERF_RAMP_QPS:
+        raise HTTPException(status_code=400, detail="Invalid ramp_qps")
+    if req.clients < 1 or req.clients > MAX_RESPERF_CLIENTS:
+        raise HTTPException(status_code=400, detail="Invalid clients")
+    if req.queries_per_step < 1 or req.queries_per_step > MAX_RESPERF_QUERIES:
+        raise HTTPException(status_code=400, detail="Invalid queries_per_step")
+
+    ensure = ensure_running(PERF_TOOLS_CONTAINER)
+    if ensure.exit_code != 0:
+        raise HTTPException(status_code=500, detail="perf_tools container not running")
+
+    target_ip = perf_target_ip(req.target)
+    queries = sanitize_perf_queries(req.queries)
+    query_file = (
+        write_perf_queries(PERF_TOOLS_CONTAINER, queries)
+        if queries
+        else DEFAULT_PERF_QUERY_FILE
+    )
+    plot_name = sanitize_plot_name(req.plot_file)
+    if not plot_name:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        plot_name = f"resperf_plot_{ts}.txt"
+    plot_path = f"/work/captures/{plot_name}"
+    cmd = (
+        f"resperf -s {target_ip} -d {query_file} -m {req.max_qps} "
+        f"-r {req.ramp_qps} -c {req.clients} -q {req.queries_per_step} "
+        f"-P {plot_path}"
+    )
+    res = docker_exec(PERF_TOOLS_CONTAINER, cmd, timeout_s=240)
+    if request:
+        audit_log(
+            request,
+            "perf_resperf",
+            {
+                "target": req.target,
+                "max_qps": req.max_qps,
+                "ramp_qps": req.ramp_qps,
+                "ok": res.ok,
+            },
+        )
+    return ResperfResponse(
+        ok=res.ok,
+        target=target_ip,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+        plot_file=plot_path,
+    )
+
+@app.post("/availability/flood", response_model=FloodTestResponse)
+def availability_flood(
+    req: FloodTestRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    if req.qps_start < 1 or req.qps_start > MAX_FLOOD_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps_start")
+    if req.qps_end < 1 or req.qps_end > MAX_FLOOD_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps_end")
+    if req.qps_step < 1 or req.qps_step > MAX_FLOOD_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps_step")
+    if req.qps_start > req.qps_end:
+        raise HTTPException(status_code=400, detail="qps_start must be <= qps_end")
+    if req.step_seconds < 5 or req.step_seconds > MAX_FLOOD_STEP_SECONDS:
+        raise HTTPException(status_code=400, detail="Invalid step_seconds")
+    if req.max_outstanding < 1 or req.max_outstanding > MAX_FLOOD_OUTSTANDING:
+        raise HTTPException(status_code=400, detail="Invalid max_outstanding")
+    if req.timeout_ms < 200 or req.timeout_ms > 5000:
+        raise HTTPException(status_code=400, detail="Invalid timeout_ms")
+
+    name = validate_name(req.name)
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+    client_container = CLIENT_CONTAINER_BY_PROFILE[req.profile]
+    steps = list(range(req.qps_start, req.qps_end + 1, req.qps_step))
+    if not steps:
+        raise HTTPException(status_code=400, detail="No steps to execute")
+    if len(steps) > MAX_FLOOD_STEPS:
+        raise HTTPException(status_code=400, detail="Too many steps")
+    total_seconds = len(steps) * req.step_seconds
+    if total_seconds > MAX_FLOOD_TOTAL_SECONDS:
+        raise HTTPException(status_code=400, detail="Total test duration too long")
+
+    cpu_streak = 0
+    cpu_required = max(1, int((30 + req.step_seconds - 1) // req.step_seconds))
+    results: list[FloodStepResult] = []
+    stop_reason: Optional[str] = None
+
+    for idx, qps in enumerate(steps, start=1):
+        timeout_s = max(0.2, req.timeout_ms / 1000.0)
+        script = f"""python - <<'PY'
+import json, math, socket, struct, time
+from concurrent.futures import ThreadPoolExecutor, wait
+
+SERVER = "{resolver_ip}"
+NAME = "{name}"
+QTYPE = "{req.qtype}"
+QPS = {qps}
+DURATION = {req.step_seconds}
+MAX_OUT = {req.max_outstanding}
+TIMEOUT = {timeout_s}
+
+QTYPE_MAP = {{
+    "A": 1, "AAAA": 28, "CAA": 257, "CNAME": 5, "DS": 43, "DNSKEY": 48,
+    "MX": 15, "NS": 2, "NSEC": 47, "NSEC3": 50, "NSEC3PARAM": 51,
+    "RRSIG": 46, "SOA": 6, "SRV": 33, "TXT": 16, "ANY": 255,
+}}
+
+def encode_name(name):
+    labels = name.strip().rstrip(".").split(".") if name.strip() else []
+    if not labels:
+        return b"\\x00"
+    out = bytearray()
+    for label in labels:
+        part = label.encode("ascii", errors="ignore")
+        if len(part) > 63:
+            part = part[:63]
+        out.append(len(part))
+        out.extend(part)
+    out.append(0)
+    return bytes(out)
+
+def build_query(name, qtype):
+    qid = int(time.time() * 1000) & 0xFFFF
+    flags = 0x0100
+    header = struct.pack("!HHHHHH", qid, flags, 1, 0, 0, 0)
+    qname = encode_name(name)
+    qtype_id = QTYPE_MAP.get(qtype, 1)
+    question = qname + struct.pack("!HH", qtype_id, 1)
+    return header + question
+
+def parse_rcode(response):
+    if len(response) < 4:
+        return None
+    return response[3] & 0x0F
+
+def query_once(query):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(TIMEOUT)
+    start = time.perf_counter()
+    try:
+        sock.sendto(query, (SERVER, 53))
+        resp, _ = sock.recvfrom(4096)
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        return True, elapsed_ms, parse_rcode(resp)
+    except socket.timeout:
+        return False, None, None
+    except Exception:
+        return False, None, None
+    finally:
+        sock.close()
+
+def percentile(values, pct):
+    if not values:
+        return 0
+    values = sorted(values)
+    idx = int(math.ceil(pct * len(values))) - 1
+    idx = max(0, min(idx, len(values) - 1))
+    return values[idx]
+
+query = build_query(NAME, QTYPE)
+interval = 1.0 / max(1, QPS)
+end_time = time.perf_counter() + DURATION
+sent = 0
+responses = 0
+timeouts = 0
+latencies = []
+rcode_counts = {{}}
+
+with ThreadPoolExecutor(max_workers=max(1, MAX_OUT)) as ex:
+    inflight = set()
+    next_send = time.perf_counter()
+    while time.perf_counter() < end_time:
+        now = time.perf_counter()
+        while now >= next_send and len(inflight) < MAX_OUT:
+            inflight.add(ex.submit(query_once, query))
+            sent += 1
+            next_send += interval
+        done, inflight = wait(inflight, timeout=0)
+        for fut in done:
+            ok, elapsed_ms, rcode = fut.result()
+            if ok:
+                responses += 1
+                if elapsed_ms is not None:
+                    latencies.append(elapsed_ms)
+                if rcode is not None:
+                    rcode_counts[rcode] = rcode_counts.get(rcode, 0) + 1
+            else:
+                timeouts += 1
+        time.sleep(0.001)
+
+    drain_until = time.perf_counter() + min(2.0, TIMEOUT * 2)
+    while inflight and time.perf_counter() < drain_until:
+        done, inflight = wait(inflight, timeout=0.05)
+        for fut in done:
+            ok, elapsed_ms, rcode = fut.result()
+            if ok:
+                responses += 1
+                if elapsed_ms is not None:
+                    latencies.append(elapsed_ms)
+                if rcode is not None:
+                    rcode_counts[rcode] = rcode_counts.get(rcode, 0) + 1
+            else:
+                timeouts += 1
+
+rcode_map = {{
+    0: "NOERROR",
+    1: "FORMERR",
+    2: "SERVFAIL",
+    3: "NXDOMAIN",
+    4: "NOTIMP",
+    5: "REFUSED",
+}}
+rcode_named = {{}}
+for key, val in rcode_counts.items():
+    rcode_named[rcode_map.get(key, f"RCODE={{key}}")] = val
+
+avg_ms = int(sum(latencies) / len(latencies)) if latencies else 0
+p95_ms = int(percentile(latencies, 0.95)) if latencies else 0
+max_ms = int(max(latencies)) if latencies else 0
+loss_pct = (timeouts / sent * 100.0) if sent else 0.0
+result = {{
+    "sent": sent,
+    "responses": responses,
+    "timeouts": timeouts,
+    "loss_pct": round(loss_pct, 2),
+    "rcode_counts": rcode_named,
+    "avg_ms": avg_ms,
+    "p95_ms": p95_ms,
+    "max_ms": max_ms,
+}}
+print(json.dumps(result))
+PY"""
+
+        exec_timeout = min(180, req.step_seconds + 20)
+        exec_result = docker_exec(client_container, script, timeout_s=exec_timeout)
+        if not exec_result.ok:
+            raise HTTPException(
+                status_code=502,
+                detail=exec_result.stderr or "Flood step failed",
+            )
+        raw = (exec_result.stdout or "").strip()
+        line = raw.splitlines()[-1] if raw else ""
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            raise HTTPException(
+                status_code=502, detail=f"Invalid flood output: {raw[:200]}"
+            )
+
+        sent = int(data.get("sent", 0))
+        responses = int(data.get("responses", 0))
+        timeouts = int(data.get("timeouts", 0))
+        loss_pct = float(data.get("loss_pct", 0.0))
+        rcode_counts = data.get("rcode_counts", {}) or {}
+        avg_ms = int(data.get("avg_ms", 0))
+        p95_ms = int(data.get("p95_ms", 0))
+        max_ms = int(data.get("max_ms", 0))
+
+        servfail = int(rcode_counts.get("SERVFAIL", 0))
+        servfail_pct = (servfail / sent * 100.0) if sent else 0.0
+        actual_qps = round((sent / req.step_seconds) if req.step_seconds else 0.0, 2)
+
+        cpu_pct = _resolver_cpu_pct(_resolver_container(req.resolver))
+        if req.stop_cpu_pct > 0 and cpu_pct is not None and cpu_pct >= req.stop_cpu_pct:
+            cpu_streak += 1
+        else:
+            cpu_streak = 0
+
+        step_stop_reason = None
+        if req.stop_loss_pct > 0 and loss_pct > req.stop_loss_pct:
+            step_stop_reason = f"loss {loss_pct:.2f}% > {req.stop_loss_pct:.2f}%"
+        elif req.stop_p95_ms > 0 and p95_ms > req.stop_p95_ms:
+            step_stop_reason = f"p95 {p95_ms} ms > {req.stop_p95_ms} ms"
+        elif req.stop_servfail_pct > 0 and servfail_pct > req.stop_servfail_pct:
+            step_stop_reason = (
+                f"SERVFAIL {servfail_pct:.2f}% > {req.stop_servfail_pct:.2f}%"
+            )
+        elif req.stop_cpu_pct > 0 and cpu_pct is not None and cpu_streak >= cpu_required:
+            step_stop_reason = f"CPU {cpu_pct:.1f}% >= {req.stop_cpu_pct:.1f}%"
+
+        results.append(
+            FloodStepResult(
+                step=idx,
+                qps=qps,
+                actual_qps=actual_qps,
+                duration_s=req.step_seconds,
+                sent=sent,
+                responses=responses,
+                timeouts=timeouts,
+                loss_pct=loss_pct,
+                rcode_counts=rcode_counts,
+                avg_ms=avg_ms,
+                p95_ms=p95_ms,
+                max_ms=max_ms,
+                servfail_pct=round(servfail_pct, 2),
+                cpu_pct=cpu_pct,
+                stop_reason=step_stop_reason,
+            )
+        )
+
+        if step_stop_reason:
+            stop_reason = step_stop_reason
+            break
+
+    if request:
+        audit_log(
+            request,
+            "availability_flood",
+            {
+                "profile": req.profile,
+                "resolver": req.resolver,
+                "name": name,
+                "qtype": req.qtype,
+                "steps": len(results),
+                "stopped_early": stop_reason is not None,
+                "stop_reason": stop_reason,
+            },
+        )
+
+    return FloodTestResponse(
+        ok=True,
+        target=f"{req.profile}/{req.resolver}@{resolver_ip}",
+        name=name,
+        qtype=req.qtype,
+        steps=results,
+        stopped_early=stop_reason is not None,
+        stop_reason=stop_reason,
+    )
+
+@app.post("/availability/rrl-test", response_model=RrlTestResponse)
+def availability_rrl_test(
+    req: RrlTestRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    if req.count < 1 or req.count > MAX_RRL_COUNT:
+        raise HTTPException(status_code=400, detail="Invalid count")
+
+    name = validate_name(req.name)
+    bind_text = _read_text(BIND_CONFIGS[0])
+    rrl_block = _extract_rrl_block(bind_text)
+    rrl_enabled = bool(rrl_block)
+
+    if not rrl_enabled:
+        if request:
+            audit_log(
+                request,
+                "availability_rrl_test",
+                {
+                    "name": name,
+                    "qtype": req.qtype,
+                    "count": req.count,
+                    "rrl_enabled": False,
+                    "matches": 0,
+                },
+            )
+        return RrlTestResponse(
+            ok=True,
+            rrl_enabled=False,
+            config_excerpt="",
+            log_excerpt="",
+            matches=[],
+        )
+
+    script = f"""python - <<'PY'
+import socket, struct, time
+
+SERVER = "{AUTH_CHILD_IP}"
+NAME = "{name}"
+QTYPE = "{req.qtype}"
+COUNT = {req.count}
+
+QTYPE_MAP = {{
+    "A": 1, "AAAA": 28, "CAA": 257, "CNAME": 5, "DS": 43, "DNSKEY": 48,
+    "MX": 15, "NS": 2, "NSEC": 47, "NSEC3": 50, "NSEC3PARAM": 51,
+    "RRSIG": 46, "SOA": 6, "SRV": 33, "TXT": 16, "ANY": 255,
+}}
+
+def encode_name(name):
+    labels = name.strip().rstrip(".").split(".") if name.strip() else []
+    if not labels:
+        return b"\\x00"
+    out = bytearray()
+    for label in labels:
+        part = label.encode("ascii", errors="ignore")
+        if len(part) > 63:
+            part = part[:63]
+        out.append(len(part))
+        out.extend(part)
+    out.append(0)
+    return bytes(out)
+
+def build_query(name, qtype):
+    qid = int(time.time() * 1000) & 0xFFFF
+    flags = 0x0100
+    header = struct.pack("!HHHHHH", qid, flags, 1, 0, 0, 0)
+    qname = encode_name(name)
+    qtype_id = QTYPE_MAP.get(qtype, 1)
+    question = qname + struct.pack("!HH", qtype_id, 1)
+    return header + question
+
+query = build_query(NAME, QTYPE)
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+for _ in range(COUNT):
+    sock.sendto(query, (SERVER, 53))
+sock.close()
+time.sleep(1.0)
+print("sent", COUNT)
+PY"""
+    timeout_s = min(60, max(10, int(req.count / 200) + 10))
+    exec_result = docker_exec(TOOLBOX_CONTAINER, script, timeout_s=timeout_s)
+    if exec_result.exit_code != 0:
+        raise HTTPException(
+            status_code=502,
+            detail=exec_result.stderr or "RRL test command failed",
+        )
+
+    log_tail = max(20, min(req.log_tail, 2000))
+    log_text = _tail_bind_log(log_tail)
+    pattern = re.compile(r"(rate[- ]limit|rrl|slip|limit)", re.IGNORECASE)
+    matches = [line for line in log_text.splitlines() if pattern.search(line)]
+    match_excerpt = "\n".join(matches[-20:]) if matches else ""
+
+    if request:
+        audit_log(
+            request,
+            "availability_rrl_test",
+            {
+                "name": name,
+                "qtype": req.qtype,
+                "count": req.count,
+                "rrl_enabled": rrl_enabled,
+                "matches": len(matches),
+            },
+        )
+
+    return RrlTestResponse(
+        ok=True,
+        rrl_enabled=rrl_enabled,
+        config_excerpt=rrl_block,
+        log_excerpt=match_excerpt,
+        matches=matches[-20:],
+    )
+
+@app.post("/amplification/test", response_model=AmplificationTestResponse)
+def amplification_test(
+    req: AmplificationTestRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    if req.count_per_qtype < 1 or req.count_per_qtype > MAX_AMP_COUNT:
+        raise HTTPException(status_code=400, detail="Invalid count_per_qtype")
+    if not req.qtypes:
+        raise HTTPException(status_code=400, detail="No qtypes provided")
+
+    for size in req.edns_sizes:
+        if size < 512 or size > 4096:
+            raise HTTPException(status_code=400, detail="Invalid edns_size")
+
+    name = validate_name(req.name)
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+
+    results: list[AmplificationResult] = []
+    for size in req.edns_sizes:
+        for qtype in req.qtypes:
+            total_latency: list[int] = []
+            udp_sizes: list[int] = []
+            tcp_sizes: list[int] = []
+            tc_count = 0
+            tcp_count = 0
+            rcode_counts: dict[str, int] = {}
+
+            for _ in range(req.count_per_qtype):
+                try:
+                    udp_ms, rcode, udp_size, tc = _udp_query(
+                        resolver_ip,
+                        name,
+                        qtype,
+                        edns_size=size,
+                        dnssec=req.dnssec,
+                    )
+                    udp_sizes.append(udp_size)
+                    if tc:
+                        tc_count += 1
+                    tcp_used = False
+                    tcp_ms = 0
+                    tcp_size = 0
+                    if tc and req.tcp_fallback:
+                        tcp_used = True
+                        tcp_count += 1
+                        try:
+                            tcp_ms, tcp_rcode, tcp_size, _ = _tcp_query(
+                                resolver_ip,
+                                name,
+                                qtype,
+                                edns_size=size,
+                                dnssec=req.dnssec,
+                            )
+                            if tcp_rcode:
+                                rcode = tcp_rcode
+                            tcp_sizes.append(tcp_size)
+                        except Exception:
+                            rcode = "TCP_FAIL"
+                    total_latency.append(udp_ms + (tcp_ms if tcp_used else 0))
+                    if rcode:
+                        rcode_counts[rcode] = rcode_counts.get(rcode, 0) + 1
+                except socket.timeout:
+                    rcode_counts["TIMEOUT"] = rcode_counts.get("TIMEOUT", 0) + 1
+                except Exception:
+                    rcode_counts["ERROR"] = rcode_counts.get("ERROR", 0) + 1
+
+            count = max(req.count_per_qtype, 1)
+            avg_udp = sum(udp_sizes) / count if udp_sizes else 0.0
+            avg_tcp = sum(tcp_sizes) / max(len(tcp_sizes), 1) if tcp_sizes else 0.0
+            avg_latency = sum(total_latency) / max(len(total_latency), 1)
+            results.append(
+                AmplificationResult(
+                    edns_size=size,
+                    qtype=qtype,
+                    count=req.count_per_qtype,
+                    rcode_counts=rcode_counts,
+                    tc_rate=tc_count / count,
+                    tcp_rate=tcp_count / count,
+                    avg_latency_ms=round(avg_latency, 2),
+                    p95_latency_ms=_p95(total_latency),
+                    avg_udp_size=round(avg_udp, 2),
+                    max_udp_size=max(udp_sizes) if udp_sizes else 0,
+                    avg_tcp_size=round(avg_tcp, 2),
+                    max_tcp_size=max(tcp_sizes) if tcp_sizes else 0,
+                )
+            )
+
+    return AmplificationTestResponse(
+        ok=True,
+        target=f"{req.profile}/{req.resolver}@{resolver_ip}",
+        name=name,
+        results=results,
+    )
+
+@app.post("/amplification/mix", response_model=MixLoadResponse)
+def amplification_mix(
+    req: MixLoadRequest, x_api_key: Optional[str] = Header(default=None)
+):
+    require_key(x_api_key)
+    if req.count < 1 or req.count > MAX_MIX_COUNT:
+        raise HTTPException(status_code=400, detail="Invalid count")
+    if req.edns_size < 512 or req.edns_size > 4096:
+        raise HTTPException(status_code=400, detail="Invalid edns_size")
+
+    zone = validate_name(req.zone)
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+
+    total_latency: list[int] = []
+    udp_sizes: list[int] = []
+    tcp_sizes: list[int] = []
+    tc_count = 0
+    tcp_count = 0
+    rcode_counts: dict[str, int] = {}
+    mix_counts = {"A": 0, "AAAA": 0, "NXDOMAIN": 0, "DNSKEY": 0}
+
+    for i in range(req.count):
+        roll = secrets.randbelow(100)
+        qtype = "A"
+        name = f"www.{zone}"
+        if roll < 40:
+            qtype = "A"
+            mix_counts["A"] += 1
+        elif roll < 80:
+            qtype = "AAAA"
+            mix_counts["AAAA"] += 1
+        elif roll < 90:
+            qtype = "A"
+            name = f"nope-{i}-{secrets.randbelow(9999)}.{zone}"
+            mix_counts["NXDOMAIN"] += 1
+        else:
+            qtype = "DNSKEY"
+            name = zone
+            mix_counts["DNSKEY"] += 1
+
+        try:
+            udp_ms, rcode, udp_size, tc = _udp_query(
+                resolver_ip,
+                name,
+                qtype,
+                edns_size=req.edns_size,
+                dnssec=req.dnssec,
+            )
+            udp_sizes.append(udp_size)
+            if tc:
+                tc_count += 1
+            tcp_used = False
+            tcp_ms = 0
+            tcp_size = 0
+            if tc and req.tcp_fallback:
+                tcp_used = True
+                tcp_count += 1
+                try:
+                    tcp_ms, tcp_rcode, tcp_size, _ = _tcp_query(
+                        resolver_ip,
+                        name,
+                        qtype,
+                        edns_size=req.edns_size,
+                        dnssec=req.dnssec,
+                    )
+                    if tcp_rcode:
+                        rcode = tcp_rcode
+                    tcp_sizes.append(tcp_size)
+                except Exception:
+                    rcode = "TCP_FAIL"
+            total_latency.append(udp_ms + (tcp_ms if tcp_used else 0))
+            if rcode:
+                rcode_counts[rcode] = rcode_counts.get(rcode, 0) + 1
+        except socket.timeout:
+            rcode_counts["TIMEOUT"] = rcode_counts.get("TIMEOUT", 0) + 1
+        except Exception:
+            rcode_counts["ERROR"] = rcode_counts.get("ERROR", 0) + 1
+
+    count = max(req.count, 1)
+    avg_udp = sum(udp_sizes) / count if udp_sizes else 0.0
+    avg_tcp = sum(tcp_sizes) / max(len(tcp_sizes), 1) if tcp_sizes else 0.0
+    avg_latency = sum(total_latency) / max(len(total_latency), 1)
+    return MixLoadResponse(
+        ok=True,
+        target=f"{req.profile}/{req.resolver}@{resolver_ip}",
+        count=req.count,
+        edns_size=req.edns_size,
+        rcode_counts=rcode_counts,
+        query_mix=mix_counts,
+        tc_rate=tc_count / count,
+        tcp_rate=tcp_count / count,
+        avg_latency_ms=round(avg_latency, 2),
+        p95_latency_ms=_p95(total_latency),
+        avg_udp_size=round(avg_udp, 2),
+        max_udp_size=max(udp_sizes) if udp_sizes else 0,
+        avg_tcp_size=round(avg_tcp, 2),
+        max_tcp_size=max(tcp_sizes) if tcp_sizes else 0,
+    )
 
 @app.post("/dig", response_model=CmdResponse)
 def dig(req: DigRequest, x_api_key: Optional[str] = Header(default=None)):
@@ -477,6 +2418,17 @@ def logs(
 ):
     require_key(x_api_key)
 
+    if service == "bind" and AUTH_AGENT_URL:
+        data = _agent_request(
+            AUTH_AGENT_URL, "/logs", {"scope": "bind", "tail": tail}
+        )
+        return CmdResponse(**data)
+    if service == "unbound" and RESOLVER_AGENT_URL:
+        data = _agent_request(
+            RESOLVER_AGENT_URL, "/logs", {"scope": "unbound", "tail": tail}
+        )
+        return CmdResponse(**data)
+
     base = Path("/logs/bind") if service == "bind" else Path("/logs/unbound")
     candidates = sorted(
         [p for p in base.rglob("*") if p.is_file()],
@@ -493,11 +2445,24 @@ def logs(
 @app.get("/config/list", response_model=ConfigListResponse)
 def config_list(x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
+    if AUTH_AGENT_URL or RESOLVER_AGENT_URL:
+        files: list[ConfigFile] = []
+        if AUTH_AGENT_URL:
+            auth = _agent_request(AUTH_AGENT_URL, "/config/list")
+            files.extend(ConfigFile(**f) for f in auth.get("files", []))
+        if RESOLVER_AGENT_URL:
+            res = _agent_request(RESOLVER_AGENT_URL, "/config/list")
+            files.extend(ConfigFile(**f) for f in res.get("files", []))
+        return ConfigListResponse(ok=True, files=files)
     return ConfigListResponse(ok=True, files=list_config_files())
 
 @app.get("/config/file", response_model=ConfigFileResponse)
 def config_file(path: str, x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
+    agent_url = _agent_for_config(path)
+    if agent_url:
+        data = _agent_request(agent_url, "/config/file", {"path": path})
+        return ConfigFileResponse(**data)
     full = resolve_config_path(path)
     if not full.exists() or not full.is_file():
         raise HTTPException(status_code=404, detail="File not found")
@@ -517,9 +2482,120 @@ def config_file(path: str, x_api_key: Optional[str] = Header(default=None)):
         content=content,
     )
 
-@app.post("/capture/start", response_model=CaptureStartResponse)
-def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(default=None)):
+@app.get("/diagnostics/startup", response_model=StartupDiagnosticsResponse)
+def diagnostics_startup(x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
+    issues: list[str] = []
+    details: dict[str, str] = {}
+
+    bind_parent_text = ""
+    if AUTH_AGENT_URL:
+        try:
+            data = _agent_request(
+                AUTH_AGENT_URL, "/logs", {"scope": "bind_parent", "tail": 200}
+            )
+            bind_parent_text = data.get("stdout", "")
+        except HTTPException as exc:
+            details["bind_parent_error"] = f"agent error: {exc.detail}"
+    else:
+        log = _latest_log_file(Path("/logs/bind_parent"))
+        if log:
+            bind_parent_text = _tail_file(log, 200)
+            details["bind_parent_log"] = str(log)
+
+    conflict_marker = "writeable file '/etc/bind/zones/db.test': already in use"
+    if conflict_marker in bind_parent_text:
+        issues.append(
+            "authoritative_parent failed: db.test is writable in two views. "
+            "Use in-view in external view to reference the internal zone."
+        )
+        details["bind_parent_excerpt"] = bind_parent_text[-1200:]
+    elif "loading configuration: failure" in bind_parent_text:
+        issues.append("authoritative_parent failed to load config (see bind_parent log)")
+        details["bind_parent_excerpt"] = bind_parent_text[-1200:]
+
+    return StartupDiagnosticsResponse(ok=len(issues) == 0, issues=issues, details=details)
+
+@app.post("/maintenance/authoritative/clear-signed", response_model=MaintenanceResponse)
+def maintenance_clear_authoritative_signed(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+    parent_cmd = "rm -f /etc/bind/zones/db.test.signed /etc/bind/zones/db.test.signed.jnl"
+    child_cmd = (
+        "rm -f /etc/bind/zones/db.example.test.signed "
+        "/etc/bind/zones/db.example.test.signed.jnl "
+        "/etc/bind/zones/db.example.test.internal.signed "
+        "/etc/bind/zones/db.example.test.internal.signed.jnl"
+    )
+    removed_parent = docker_exec(SIGNING_PARENT_CONTAINER, parent_cmd)
+    removed_child = docker_exec(SIGNING_CHILD_CONTAINER, child_cmd)
+    restarted = docker_cmd(
+        ["restart", SIGNING_PARENT_CONTAINER, SIGNING_CHILD_CONTAINER], timeout_s=20
+    )
+    ok = removed_parent.ok and removed_child.ok and restarted.ok
+    stdout = "\n".join(
+        [
+            f"[remove parent]\n{removed_parent.stdout}".strip(),
+            f"[remove child]\n{removed_child.stdout}".strip(),
+            f"[restart]\n{restarted.stdout}".strip(),
+        ]
+    ).strip()
+    stderr = "\n".join(
+        [
+            f"[remove parent]\n{removed_parent.stderr}".strip(),
+            f"[remove child]\n{removed_child.stderr}".strip(),
+            f"[restart]\n{restarted.stderr}".strip(),
+        ]
+    ).strip()
+    if request:
+        audit_log(
+            request,
+            "maintenance_clear_authoritative_signed",
+            {"ok": ok},
+        )
+    return MaintenanceResponse(
+        ok=ok,
+        command=(
+            f"docker exec {SIGNING_PARENT_CONTAINER} {parent_cmd} && "
+            f"docker exec {SIGNING_CHILD_CONTAINER} {child_cmd} && "
+            f"docker restart {SIGNING_PARENT_CONTAINER} {SIGNING_CHILD_CONTAINER}"
+        ),
+        exit_code=0 if ok else 1,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+@app.get("/agent/status", response_model=AgentAggregateResponse)
+def agent_status(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    agents: dict[str, dict] = {}
+    if AUTH_AGENT_URL:
+        agents["authoritative"] = _agent_request(AUTH_AGENT_URL, "/status")
+    if RESOLVER_AGENT_URL:
+        agents["resolver"] = _agent_request(RESOLVER_AGENT_URL, "/status")
+    return AgentAggregateResponse(ok=True, agents=agents)
+
+@app.get("/agent/stats", response_model=AgentAggregateResponse)
+def agent_stats(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    agents: dict[str, dict] = {}
+    if AUTH_AGENT_URL:
+        agents["authoritative"] = _agent_request(AUTH_AGENT_URL, "/stats")
+    if RESOLVER_AGENT_URL:
+        agents["resolver"] = _agent_request(RESOLVER_AGENT_URL, "/stats")
+    return AgentAggregateResponse(ok=True, agents=agents)
+
+@app.post("/capture/start", response_model=CaptureStartResponse)
+def capture_start(
+    req: CaptureStartRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
     ensure_capture_dir()
 
     if req.filter not in CAPTURE_FILTERS:
@@ -529,6 +2605,12 @@ def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(de
         raise HTTPException(status_code=409, detail=f"{req.target} capture already running")
 
     container = CAPTURE_TARGETS[req.target]
+    check_tcpdump = docker_exec_root(container, "command -v tcpdump >/dev/null 2>&1")
+    if check_tcpdump.exit_code != 0:
+        raise HTTPException(
+            status_code=500,
+            detail=f"tcpdump not found in {container}. Rebuild capture-enabled images.",
+        )
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"{req.target}-{ts}.pcap"
     filter_expr = CAPTURE_FILTERS[req.filter]
@@ -546,9 +2628,12 @@ def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(de
         f"echo $! > {pid_path}; "
         f"echo {filename} > {file_path}"
     )
-    result = docker_exec(container, sh_cmd)
+    result = docker_exec_root(container, sh_cmd)
     if result.exit_code != 0:
         raise HTTPException(status_code=500, detail=result.stderr or "Failed to start capture")
+
+    if request:
+        audit_log(request, "capture_start", {"target": req.target, "filter": req.filter})
 
     return CaptureStartResponse(
         ok=True,
@@ -559,8 +2644,13 @@ def capture_start(req: CaptureStartRequest, x_api_key: Optional[str] = Header(de
     )
 
 @app.post("/capture/stop", response_model=CaptureStopResponse)
-def capture_stop(req: CaptureStopRequest, x_api_key: Optional[str] = Header(default=None)):
+def capture_stop(
+    req: CaptureStopRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
     require_key(x_api_key)
+    require_docker()
     ensure_capture_dir()
 
     container = CAPTURE_TARGETS[req.target]
@@ -575,13 +2665,15 @@ def capture_stop(req: CaptureStopRequest, x_api_key: Optional[str] = Header(defa
         f"rm -f {pid_path}; "
         "echo $file"
     )
-    result = docker_exec(container, sh_cmd)
+    result = docker_exec_root(container, sh_cmd)
     if result.exit_code == 2:
         raise HTTPException(status_code=404, detail="No running capture")
     if result.exit_code != 0:
         raise HTTPException(status_code=500, detail=result.stderr or "Failed to stop capture")
 
     filename = result.stdout.strip() or None
+    if request:
+        audit_log(request, "capture_stop", {"target": req.target, "file": filename})
     return CaptureStopResponse(ok=True, target=req.target, file=filename)
 
 @app.get("/capture/list", response_model=CaptureListResponse)
@@ -590,6 +2682,7 @@ def capture_list(
     x_api_key: Optional[str] = Header(default=None),
 ):
     require_key(x_api_key)
+    require_docker()
     ensure_capture_dir()
 
     files: list[CaptureFileInfo] = []
@@ -620,6 +2713,51 @@ def capture_list(
     }
     return CaptureListResponse(ok=True, files=files, running=running)
 
+@app.get("/capture/health", response_model=CaptureHealthResponse)
+def capture_health(
+    target: Literal["resolver", "authoritative"],
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+    require_docker()
+    ensure_capture_dir()
+
+    container = CAPTURE_TARGETS[target]
+    pid_path = capture_pid_file(target)
+    log_path = capture_log_file(target)
+    sh_cmd = (
+        f"if [ -f {pid_path} ]; then "
+        f"pid=$(cat {pid_path}); "
+        f"if [ -n \"$pid\" ] && [ -d /proc/$pid ]; then "
+        f"echo RUNNING:$pid; "
+        f"else echo NOTRUNNING:$pid; fi; "
+        f"else echo NOPID; fi; "
+        f"echo LOG; tail -n 5 {log_path} 2>/dev/null"
+    )
+    result = docker_exec_root(container, sh_cmd)
+    stdout = result.stdout.strip()
+    running = False
+    pid = None
+    detail = stdout
+    if stdout.startswith("RUNNING:"):
+        running = True
+        try:
+            pid = int(stdout.split(":", 1)[1].splitlines()[0])
+        except Exception:
+            pid = None
+    elif stdout.startswith("NOTRUNNING:"):
+        try:
+            pid = int(stdout.split(":", 1)[1].splitlines()[0])
+        except Exception:
+            pid = None
+    return CaptureHealthResponse(
+        ok=result.ok,
+        target=target,
+        running=running,
+        pid=pid,
+        detail=detail,
+    )
+
 @app.get("/capture/download")
 def capture_download(
     file: str,
@@ -643,9 +2781,15 @@ def capture_download(
     )
 
 @app.post("/resolver/restart", response_model=ResolverRestartResponse)
-def resolver_restart(x_api_key: Optional[str] = Header(default=None)):
+def resolver_restart(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
     require_key(x_api_key)
+    require_docker()
     res = docker_cmd(["restart", RESOLVER_CONTAINER], timeout_s=20)
+    if request:
+        audit_log(request, "resolver_restart", {"ok": res.ok})
     return ResolverRestartResponse(
         ok=res.ok,
         command=res.command,
@@ -656,9 +2800,12 @@ def resolver_restart(x_api_key: Optional[str] = Header(default=None)):
 
 @app.post("/resolver/flush", response_model=ResolverFlushResponse)
 def resolver_flush(
-    req: ResolverFlushRequest, x_api_key: Optional[str] = Header(default=None)
+    req: ResolverFlushRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
 ):
     require_key(x_api_key)
+    require_docker()
     zone = validate_name(req.zone)
     res = docker_exec(
         RESOLVER_CONTAINER,
@@ -666,6 +2813,8 @@ def resolver_flush(
         f"flush_zone {zone}",
         timeout_s=8,
     )
+    if request:
+        audit_log(request, "resolver_flush", {"zone": zone, "ok": res.ok})
     return ResolverFlushResponse(
         ok=res.ok,
         command=res.command,
@@ -730,6 +2879,7 @@ def capture_summary(
     x_api_key: Optional[str] = Header(default=None),
 ):
     require_key(x_api_key)
+    require_docker()
     ensure_capture_dir()
 
     if not file or "/" in file or ".." in file:
@@ -745,7 +2895,7 @@ def capture_summary(
     container = CAPTURE_TARGETS[target]
 
     total_cmd = f"tcpdump -nn -r /captures/{file} port 53 2>/dev/null | wc -l"
-    total = docker_exec(container, total_cmd, timeout_s=15)
+    total = docker_exec_root(container, total_cmd, timeout_s=15)
 
     if target == "authoritative":
         upstream_cmd = (
@@ -756,7 +2906,7 @@ def capture_summary(
         upstream_cmd = "tcpdump -nn -r /captures/{file} port 53 2>/dev/null | wc -l".format(
             file=file
         )
-    upstream = docker_exec(container, upstream_cmd, timeout_s=15)
+    upstream = docker_exec_root(container, upstream_cmd, timeout_s=15)
 
     return CaptureSummaryResponse(
         ok=total.ok and upstream.ok,
@@ -776,8 +2926,10 @@ def capture_summary(
 def signing_switch(
     req: SigningSwitchRequest,
     x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
 ):
     require_key(x_api_key)
+    require_docker()
 
     steps: list[SigningStep] = []
 
@@ -821,25 +2973,34 @@ def signing_switch(
         )
 
     if ok and req.mode == "nsec3":
-        ok = ok and record(
-            "run ds_recompute",
-            docker_cmd(["start", DS_RECOMPUTE_CONTAINER], timeout_s=15),
-        )
-        if ok:
+        ds_changed = False
+        ds_res = docker_cmd(["start", "-a", DS_RECOMPUTE_CONTAINER], timeout_s=180)
+        ok = ok and record("run ds_recompute", ds_res)
+        if ds_res.ok and "Updated DS" in (ds_res.stdout or ""):
+            ds_changed = True
+
+        if ok and ds_changed:
             ok = ok and record(
-                "wait ds_recompute",
-                docker_cmd(["wait", DS_RECOMPUTE_CONTAINER], timeout_s=120),
+                "re-sign zones after DS update",
+                docker_exec(
+                    SIGNING_SWITCHER_CONTAINER,
+                    "sh /switcher/switch_signing.sh nsec3",
+                    timeout_s=120,
+                ),
             )
+            if ok:
+                ok = ok and record(
+                    "restart authoritative (post DS update)",
+                    docker_cmd(
+                        ["restart", SIGNING_PARENT_CONTAINER, SIGNING_CHILD_CONTAINER],
+                        timeout_s=20,
+                    ),
+                )
 
         if ok:
             ok = ok and record(
                 "run anchor_export",
-                docker_cmd(["start", ANCHOR_EXPORT_CONTAINER], timeout_s=15),
-            )
-        if ok:
-            ok = ok and record(
-                "wait anchor_export",
-                docker_cmd(["wait", ANCHOR_EXPORT_CONTAINER], timeout_s=120),
+                docker_cmd(["start", "-a", ANCHOR_EXPORT_CONTAINER], timeout_s=180),
             )
 
         if ok:
@@ -848,4 +3009,6 @@ def signing_switch(
                 docker_cmd(["restart", RESOLVER_CONTAINER], timeout_s=20),
             )
 
+    if request:
+        audit_log(request, "signing_switch", {"mode": req.mode, "ok": ok})
     return SigningSwitchResponse(ok=ok, mode=req.mode, steps=steps)

@@ -289,6 +289,196 @@ DoH details:
 - Endpoint: `https://127.0.0.1:8443/dns-query`
 - Self-signed cert; clients must trust or skip verification (`-k` in curl).
 
+### Availability and Abuse Resistance (DDoS / amplification)
+This section is a conceptual overview plus simple lab exercises. The lab enables
+basic authoritative RRL and resolver rate limiting with conservative defaults.
+
+What it protects:
+- Availability of resolvers/authoritatives under overload.
+- Link saturation and abuse (reflection/amplification).
+- Upstream dependency failures (timeouts, SERVFAIL spikes).
+
+Mechanisms / topics:
+- DNS amplification/reflection: why it works, role of EDNS0, large responses,
+  and how DNSSEC increases response size.
+- RRL (Response Rate Limiting) on authoritative servers (BIND `rate-limit`).
+- Resolver rate limiting and query limiting (Unbound `ratelimit`,
+  `ip-ratelimit`, `outgoing-range`, `num-queries-per-thread`).
+- Anycast as an availability pattern (concept only in this lab).
+- Cache as availability: reduce upstream load and hide short outages.
+- Circuit breaker / fallback resolvers: secondary upstreams or fast-fail.
+- Monitoring and alerting: NXDOMAIN spike, SERVFAIL spike, latency.
+
+### Controls (UI toggles)
+The UI exposes safety knobs that update config and restart services:
+
+Unbound (resolver):
+- `ratelimit` / `ip-ratelimit` + dropped counters.
+- `unwanted-reply-threshold` (reply flood protection).
+- `serve-expired` + `serve-expired-ttl` (availability during upstream failure).
+- `prefetch`, `msg-cache-size`, `rrset-cache-size` (performance).
+- `aggressive-nsec` (helps under NXDOMAIN flood).
+
+BIND (authoritative):
+- RRL (Response Rate Limiting) with before/after comparison.
+- Recursion toggle (ensure auth is not an open resolver).
+
+### Governance / Access Control (Implemented)
+The lab implements several operational security controls:
+
+Split-horizon DNS (internal vs public):
+- Authoritative `example.test` is served via BIND views.
+- Internal view is selected for the validating resolver (`172.31.0.20`).
+- External view is served for other clients (e.g., `resolver_plain`).
+- Internal zone file: `bind9/zones/db.example.test.internal`
+- External zone file: `bind9/zones/db.example.test`
+
+ACL / views in BIND (who can query what):
+- Views use `match-clients` ACLs to separate internal/external visibility.
+- Internal view restricts `allow-query` to trusted resolvers only.
+
+Recursion control (avoid open resolver on authoritative):
+- `recursion no`, `allow-recursion { none; }`, `allow-query-cache { none; }`
+  in authoritative servers.
+
+Zone transfer protection (AXFR/IXFR):
+- `allow-transfer` requires TSIG (`xfr-key`).
+- In the lab, the key is shared only with the toolbox client for demos.
+
+Dynamic DNS updates (TSIG + policy):
+- Authoritative child accepts updates only via TSIG `update-key`.
+- Updates are restricted to the `dyn.example.test.` subtree.
+- Example (from toolbox):
+```bash
+docker compose exec toolbox sh -lc "cat > /tmp/nsupdate.txt <<'EOF'
+server 172.31.0.11
+zone example.test
+update add host1.dyn.example.test 300 A 10.10.0.55
+send
+EOF
+nsupdate -y hmac-sha256:update-key:ZG5zdXBkYXRlLWtleS1sYWItdjE= /tmp/nsupdate.txt"
+```
+
+DNSSEC key management (automation helpers):
+- Backup keys:
+  - PowerShell: `.\scripts\backup_dnssec_keys.ps1`
+  - bash: `./scripts/backup_dnssec_keys.sh`
+- Force rollover (destructive; regenerates keys):
+  - PowerShell: `.\scripts\force_dnssec_rollover.ps1 -Force`
+  - bash: `./scripts/force_dnssec_rollover.sh --force`
+  - This stops auth/resolvers, deletes keys + signed zones, restarts auth,
+    recomputes DS, exports trust anchor, and restarts resolvers.
+
+Panel/agent security (implemented):
+- Lab API enforces `LAB_API_KEY` and rate limits requests.
+- Client agents enforce `CLIENT_API_KEY` and rate limit.
+- Audit log for privileged actions: `lab_api/log/audit.log`.
+- Docker socket is removed from `lab_api` by default; endpoints that need
+  Docker now return 503 unless `LAB_API_ALLOW_DOCKER=1` and the socket is mounted.
+
+Quick checks:
+```bash
+# Split-horizon: trusted resolver (internal view)
+dig @172.32.0.20 www.example.test A +dnssec
+
+# External view via resolver_plain
+dig @172.32.0.21 www.example.test A +dnssec
+
+# AXFR with TSIG (from toolbox)
+docker compose exec toolbox sh -lc "dig @172.31.0.11 example.test AXFR -y hmac-sha256:xfr-key:c3VwZXItbGFiLXhsZnIta2V5LW1vY2s="
+```
+
+### Availability and Abuse Resistance (Experiments, simple)
+Keep these low-rate and local-only. Do not run high-volume tests against
+external infrastructure.
+
+### Flooding (metodyka i guardrails)
+Metodyka bezpiecznych testow obciazeniowych DNS (przed "flooding")
+
+**1) Izolacja i zakres testu**
+- Testy wykonuj wylacznie w odizolowanej sieci laboratoryjnej (oddzielny bridge/VLAN Docker/GNS3).
+- Ustal "scope": ktore IP sa generatorami ruchu (np. tylko client/netshoot) i ktore hosty sa celem (resolver/auth).
+- Wlacz ACL na resolverze: rekursja tylko dla sieci lab (zeby nie stal sie open resolverem).
+- Dowod do pracy: fragment konfiguracji ACL + zrzut logu "REFUSED" dla zapytania spoza dozwolonej podsieci.
+
+**2) Limity testu (guardrails)**
+- Ustal i zapisz w pracy stale ograniczenia, np.:
+- Max QPS: 20-100 QPS (demo) lub 200 QPS (jesli lab stabilny).
+- Ramp-up: stopniowo (np. 10 -> 20 -> 50 -> 100 QPS co 30-60 s).
+- Czas trwania: 30-60 s na etap (zeby nie "rozjechac" cache i systemu).
+- Max outstanding (zapytania "w locie"): 100-500.
+- Stop conditions (warunki przerwania): packet loss / timeouts > 1-2%; latency p95 > np. 200 ms (dla laba); CPU resolvera > 85% przez 30 s; wzrost SERVFAIL ponad ustalony prog.
+- Dowod do pracy: tabelka "Parametr - Wartosc - Uzasadnienie".
+
+**3) Ograniczenia po stronie uslug (rate limiting / throttling)**
+To jest wazne, bo pokazuje "ochrone dostepnosci":
+
+Resolver (Unbound) - ogranicz wplyw naduzyc:
+- limit rownoleglych klientow / zapytan (zeby jeden generator nie zabil procesu),
+- limity "outgoing" (zeby resolver nie wysylal zbyt duzo upstream naraz),
+- rozsadne cache/neg-cache (zeby NXDOMAIN nie niszczyl RAM).
+(Nazwy opcji zaleza od wersji, ale ideowo: concurrency + outgoing + cache + ewentualny ratelimit odpowiedzi.)
+
+Autorytatywny (BIND) - Response Rate Limiting (RRL):
+- Wlacz rate-limit, zeby ograniczyc masowe odpowiedzi (szczegolnie na te same wzorce).
+- W logach powinny byc widoczne "slip/limit" przy naduzyciach.
+
+Warstwa HTTP (jesli DoH):
+- Dla DoH najlepiej pokazac rate limiting w Nginx (limit_req/limit_conn).
+
+Dowod do pracy: wycinek config + wykres/metryka "requests limited".
+
+**4) Monitoring przed testem (zeby wynik byl wiarygodny)**
+Zanim puscisz ruch:
+- zbierz baseline (CPU/RAM/QPS/latency) przez 1-2 min,
+- wlacz metryki:
+  - liczba zapytan na resolverze,
+  - cache hit ratio (jesli masz),
+  - upstream QPS (resolver -> authoritative),
+  - NXDOMAIN/SERVFAIL ratio,
+  - p50/p95 latencji (dnsperf daje te statystyki).
+
+Minimalny monitoring bez Prometheusa: tcpdump + logi Unbound/BIND + wynik dnsperf.
+Lepszy (ladny do tezy): Prometheus/Grafana (wykresy "przed/po").
+
+**5) Procedura testu (bezpieczna, powtarzalna)**
+1. Reset/flush cache (albo restart resolvera) -> start od czystego stanu.
+2. Warm-up (krotki test), zeby cache sie ustabilizowal.
+3. Test wlasciwy z ramp-up i limitami QPS.
+4. Zapis danych: wynik dnsperf + licznik upstream (pcap/metryka) + logi.
+5. Cooldown: 1-2 min przerwy miedzy seriami.
+
+Flood simulation (low-rate) from the client container:
+```bash
+docker compose exec client sh -lc "for i in $(seq 1 200); do dig @172.32.0.20 example.test A +tries=1 +time=1 >/dev/null; done"
+```
+
+Measure latency impact (client container):
+```bash
+docker compose exec client sh -lc "time sh -c 'for i in $(seq 1 200); do dig @172.32.0.20 example.test A +tries=1 +time=1 >/dev/null; done'"
+```
+
+Show how DNSSEC increases response size (authoritative):
+```bash
+dig @172.31.0.10 example.test A +stats
+dig @172.31.0.10 example.test DNSKEY +dnssec +stats
+```
+Compare the `MSG SIZE rcvd` values. The DNSKEY + RRSIG response is typically
+much larger and is a common source of amplification.
+
+UI amplification test (implemented):
+- Use the "DNSSEC Amplification / EDNS" card in the UI.
+- Choose qtypes (DNSKEY, ANY, TXT, RRSIG) and EDNS sizes (1232 vs 4096).
+- The results show TC% (truncation), TCP fallback %, p95 latency, and response
+  sizes (UDP/TCP). This makes the DNSSEC size impact visible.
+
+Mix-load test (implemented):
+- Use "Mix Load" (80% A/AAAA, 10% NXDOMAIN, 10% DNSKEY).
+- Use EDNS 1232 vs 4096 and compare TC% and TCP%.
+
+Optional: If you have `dnsperf` installed, replace the loop with a low-rate
+`dnsperf` run and compare latency and drops before/after enabling limits.
+
 ## Future Improvement
 Option A: add a dedicated aggressive demo resolver that is authoritative for
 `example.test` via auth-zone (using the signed zone file), and wire the UI
