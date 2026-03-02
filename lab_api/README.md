@@ -38,9 +38,26 @@ curl -s http://localhost:8000/dig \
   -H "Content-Type: application/json" \
   -H "X-API-Key: change_me_long_random" \
   -d '{"profile":"trusted","resolver":"plain","name":"example.org","qtype":"A"}'
+
+# Send a test email (requires mailserver + swaks containers running)
+curl -s http://localhost:8000/email/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: change_me_long_random" \
+  -d '{"to":"user@example.test","from":"user@example.test","subject":"test","body":"hello","server":"mail.example.test","port":25}'
+
+# Tail mail logs (DKIM/SPF)
+curl -s "http://localhost:8000/email/logs?tail=200&grep=dkim" \
+  -H "X-API-Key: change_me_long_random"
+
+# IMAP check (read headers)
+curl -s http://localhost:8000/email/imap-check \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: change_me_long_random" \
+  -d '{"user":"user@example.test","mailbox":"INBOX","limit":40}'
 ```
 
 ## Security notes
 
 - Do **not** add any endpoint that runs arbitrary shell strings.
 - Keep this service bound to VM localhost and reach it via SSH tunnel.
+- Email endpoints require `LAB_API_ALLOW_DOCKER=1` (already set in compose).

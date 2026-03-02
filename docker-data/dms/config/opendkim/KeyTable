@@ -1,0 +1,1 @@
+mail._domainkey.example.test example.test:mail:/etc/opendkim/keys/example.test/mail.private

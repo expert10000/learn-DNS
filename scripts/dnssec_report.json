@@ -1,0 +1,350 @@
+{
+  "pcap": "G:\\Applications-2026-02-25-aspirepl2\\scripts\\pcaps\\authoritative-20260301-190718.pcap",
+  "frames_total": 4,
+  "frames": [
+    {
+      "frame_no": 1,
+      "timestamp_utc": "2026-03-01T19:07:18.911602+00:00",
+      "src": "172.31.0.20",
+      "dst": "172.31.0.11",
+      "transport": "UDP",
+      "dns": {
+        "id": 39182,
+        "opcode": "QUERY",
+        "rcode": "NOERROR",
+        "flags_text": "CD",
+        "qdcount": 1,
+        "ancount_rrsets": 0,
+        "nscount_rrsets": 0,
+        "arcount_rrsets": 0,
+        "edns": {
+          "present": true,
+          "version": 0,
+          "udp_payload": 1232,
+          "edns_flags_text": ""
+        },
+        "question": [
+          {
+            "name": "www.example.test",
+            "ttl": 0,
+            "class": "1",
+            "type": "A",
+            "rdatas": []
+          }
+        ],
+        "answer": [],
+        "authority": [],
+        "additional": []
+      },
+      "summary": {
+        "qname": "www.example.test",
+        "qtype": "A"
+      },
+      "raw": {
+        "wire_len": 45,
+        "wire_hex": "990e0010000100000000000103777777076578616d706c650474657374000001000100002904d0000080000000"
+      }
+    },
+    {
+      "frame_no": 2,
+      "timestamp_utc": "2026-03-01T19:07:18.911720+00:00",
+      "src": "172.31.0.11",
+      "dst": "172.31.0.20",
+      "transport": "UDP",
+      "dns": {
+        "id": 39182,
+        "opcode": "QUERY",
+        "rcode": "NOERROR",
+        "flags_text": "QR AA CD",
+        "qdcount": 1,
+        "ancount_rrsets": 2,
+        "nscount_rrsets": 0,
+        "arcount_rrsets": 0,
+        "edns": {
+          "present": true,
+          "version": 0,
+          "udp_payload": 1232,
+          "edns_flags_text": ""
+        },
+        "question": [
+          {
+            "name": "www.example.test",
+            "ttl": 0,
+            "class": "1",
+            "type": "A",
+            "rdatas": []
+          }
+        ],
+        "answer": [
+          {
+            "name": "www.example.test",
+            "ttl": 300,
+            "class": "1",
+            "type": "A",
+            "rdatas": [
+              {
+                "text": "172.31.0.11"
+              }
+            ]
+          },
+          {
+            "name": "www.example.test",
+            "ttl": 300,
+            "class": "1",
+            "type": "RRSIG",
+            "rdatas": [
+              {
+                "text": "A 13 3 300 20260331162924 20260301162924 58408 example.test. api3UJZQDmcgaW1kfYqi65gY8GaaS8yh EE/UmyhfrfgXHO2b9QiPgN8mQHopeB77 Bg87/OMP6x5X3ECUWB2Hkw==",
+                "type_covered": "A",
+                "algorithm": 13,
+                "labels": 3,
+                "original_ttl": 300,
+                "expiration": 1774974564,
+                "inception": 1772382564,
+                "key_tag": 58408,
+                "signer": "example.test"
+              }
+            ]
+          }
+        ],
+        "authority": [],
+        "additional": []
+      },
+      "summary": {
+        "qname": "www.example.test",
+        "qtype": "A"
+      },
+      "raw": {
+        "wire_len": 169,
+        "wire_hex": "990e8410000100020000000103777777076578616d706c6504746573740000010001c00c000100010000012c0004ac1f000bc00c002e00010000012c006000010d030000012c69cbf66469a46964e428076578616d706c650474657374006a98b75096500e6720696d647d8aa2eb9818f0669a4bcca1104fd49b285fadf8171ced9bf5088f80df26407a29781efb060f3bfce30feb1e57dc4094581d879300002904d0000080000000"
+      }
+    },
+    {
+      "frame_no": 3,
+      "timestamp_utc": "2026-03-01T19:07:18.917739+00:00",
+      "src": "172.31.0.20",
+      "dst": "172.31.0.11",
+      "transport": "UDP",
+      "dns": {
+        "id": 53792,
+        "opcode": "QUERY",
+        "rcode": "NOERROR",
+        "flags_text": "CD",
+        "qdcount": 1,
+        "ancount_rrsets": 0,
+        "nscount_rrsets": 0,
+        "arcount_rrsets": 0,
+        "edns": {
+          "present": true,
+          "version": 0,
+          "udp_payload": 1232,
+          "edns_flags_text": ""
+        },
+        "question": [
+          {
+            "name": "example.test",
+            "ttl": 0,
+            "class": "1",
+            "type": "DNSKEY",
+            "rdatas": []
+          }
+        ],
+        "answer": [],
+        "authority": [],
+        "additional": []
+      },
+      "summary": {
+        "qname": "example.test",
+        "qtype": "DNSKEY"
+      },
+      "raw": {
+        "wire_len": 41,
+        "wire_hex": "d22000100001000000000001076578616d706c650474657374000030000100002904d0000080000000"
+      }
+    },
+    {
+      "frame_no": 4,
+      "timestamp_utc": "2026-03-01T19:07:18.918068+00:00",
+      "src": "172.31.0.11",
+      "dst": "172.31.0.20",
+      "transport": "UDP",
+      "dns": {
+        "id": 53792,
+        "opcode": "QUERY",
+        "rcode": "NOERROR",
+        "flags_text": "QR AA CD",
+        "qdcount": 1,
+        "ancount_rrsets": 2,
+        "nscount_rrsets": 0,
+        "arcount_rrsets": 0,
+        "edns": {
+          "present": true,
+          "version": 0,
+          "udp_payload": 1232,
+          "edns_flags_text": ""
+        },
+        "question": [
+          {
+            "name": "example.test",
+            "ttl": 0,
+            "class": "1",
+            "type": "DNSKEY",
+            "rdatas": []
+          }
+        ],
+        "answer": [
+          {
+            "name": "example.test",
+            "ttl": 3600,
+            "class": "1",
+            "type": "DNSKEY",
+            "rdatas": [
+              {
+                "text": "256 3 13 di9PGNiFGYmUznA5FFVf3whaKxk4ULLH /X1bjgdxxFbJj+POAUNP8e59TTxaPUYp R62PCD6ptqAKwhyQ7kev2w==",
+                "flags": 256,
+                "protocol": 3,
+                "algorithm": 13,
+                "key_tag": 58408
+              },
+              {
+                "text": "257 3 13 9LSr/9K7uAL7VS4yQPgPlIJrM+r3fZOH KlbjpaXhzSyBC2l9TZGwjiRjOqLEK+2v 63flRkTcWvehlg7lAlmCPw==",
+                "flags": 257,
+                "protocol": 3,
+                "algorithm": 13,
+                "key_tag": 2860
+              },
+              {
+                "text": "257 3 13 72KJS6qL7DQ/sROs4+8dSC/ProCljwQz bqjfszDjanVovdsbS5N+kTRbpB+wQByI s87TyAUHDRTSNKZgXicSBQ==",
+                "flags": 257,
+                "protocol": 3,
+                "algorithm": 13,
+                "key_tag": 3984
+              }
+            ]
+          },
+          {
+            "name": "example.test",
+            "ttl": 3600,
+            "class": "1",
+            "type": "RRSIG",
+            "rdatas": [
+              {
+                "text": "DNSKEY 13 2 3600 20260331162924 20260301162924 3984 example.test. TigC/7XWj5+I3SRwMnJr0dUOS1yVqcTy x2Y5boTllM2dVEagHuoqYdjrjVbUSAp0 WG/aXyBPbiagu781ug+dBw==",
+                "type_covered": "DNSKEY",
+                "algorithm": 13,
+                "labels": 2,
+                "original_ttl": 3600,
+                "expiration": 1774974564,
+                "inception": 1772382564,
+                "key_tag": 3984,
+                "signer": "example.test"
+              },
+              {
+                "text": "DNSKEY 13 2 3600 20260331162924 20260301162924 58408 example.test. c5XA//LjbYau7iQYle3u2faUXxc+epP9 K5RINw5msCkIPYUlfSSfg0/fVPYLY6ky PF4w4smwM8H97bRALC62bQ==",
+                "type_covered": "DNSKEY",
+                "algorithm": 13,
+                "labels": 2,
+                "original_ttl": 3600,
+                "expiration": 1774974564,
+                "inception": 1772382564,
+                "key_tag": 58408,
+                "signer": "example.test"
+              }
+            ]
+          }
+        ],
+        "authority": [],
+        "additional": []
+      },
+      "summary": {
+        "qname": "example.test",
+        "qtype": "DNSKEY"
+      },
+      "raw": {
+        "wire_len": 497,
+        "wire_hex": "d22084100001000500000001076578616d706c6504746573740000300001c00c0030000100000e1000440100030d762f4f18d885198994ce703914555fdf085a2b193850b2c7fd7d5b8e0771c456c98fe3ce01434ff1ee7d4d3c5a3d462947ad8f083ea9b6a00ac21c90ee47afdbc00c0030000100000e1000440101030df4b4abffd2bbb802fb552e3240f80f94826b33eaf77d93872a56e3a5a5e1cd2c810b697d4d91b08e24633aa2c42bedafeb77e54644dc5af7a1960ee50259823fc00c0030000100000e1000440101030def62894baa8bec343fb113ace3ef1d482fcfae80a58f04336ea8dfb330e36a7568bddb1b4b937e91345ba41fb0401c88b3ced3c805070d14d234a6605e271205c00c002e000100000e10006000300d0200000e1069cbf66469a469640f90076578616d706c650474657374004e2802ffb5d68f9f88dd247032726bd1d50e4b5c95a9c4f2c766396e84e594cd9d5446a01eea2a61d8eb8d56d4480a74586fda5f204f6e26a0bbbf35ba0f9d07c00c002e000100000e10006000300d0200000e1069cbf66469a46964e428076578616d706c650474657374007395c0fff2e36d86aeee241895edeed9f6945f173e7a93fd2b9448370e66b029083d85257d249f834fdf54f60b63a9323c5e30e2c9b033c1fdedb4402c2eb66d00002904d0000080000000"
+      }
+    }
+  ],
+  "dnssec": {
+    "dnskeys": [
+      {
+        "zone": "example.test",
+        "key_tag": 58408,
+        "role": "ZSK",
+        "flags": 256,
+        "algorithm": 13,
+        "protocol": 3,
+        "key_len_bits": 512,
+        "seen_src": "172.31.0.11",
+        "seen_dst": "172.31.0.20"
+      },
+      {
+        "zone": "example.test",
+        "key_tag": 2860,
+        "role": "KSK",
+        "flags": 257,
+        "algorithm": 13,
+        "protocol": 3,
+        "key_len_bits": 512,
+        "seen_src": "172.31.0.11",
+        "seen_dst": "172.31.0.20"
+      },
+      {
+        "zone": "example.test",
+        "key_tag": 3984,
+        "role": "KSK",
+        "flags": 257,
+        "algorithm": 13,
+        "protocol": 3,
+        "key_len_bits": 512,
+        "seen_src": "172.31.0.11",
+        "seen_dst": "172.31.0.20"
+      }
+    ],
+    "ds": [],
+    "rrsig": [
+      {
+        "owner": "www.example.test",
+        "type_covered": "A",
+        "algorithm": 13,
+        "labels": 3,
+        "original_ttl": 300,
+        "expiration": 1774974564,
+        "inception": 1772382564,
+        "key_tag": 58408,
+        "signer": "example.test",
+        "seen_src": "172.31.0.11",
+        "seen_dst": "172.31.0.20"
+      },
+      {
+        "owner": "example.test",
+        "type_covered": "DNSKEY",
+        "algorithm": 13,
+        "labels": 2,
+        "original_ttl": 3600,
+        "expiration": 1774974564,
+        "inception": 1772382564,
+        "key_tag": 3984,
+        "signer": "example.test",
+        "seen_src": "172.31.0.11",
+        "seen_dst": "172.31.0.20"
+      },
+      {
+        "owner": "example.test",
+        "type_covered": "DNSKEY",
+        "algorithm": 13,
+        "labels": 2,
+        "original_ttl": 3600,
+        "expiration": 1774974564,
+        "inception": 1772382564,
+        "key_tag": 58408,
+        "signer": "example.test",
+        "seen_src": "172.31.0.11",
+        "seen_dst": "172.31.0.20"
+      }
+    ],
+    "nsec": [],
+    "nsec3": []
+  }
+}

@@ -1,0 +1,64 @@
+
+    <!doctype html>
+    <html>
+    <head>
+      <meta charset="utf-8"/>
+      <title>DNS/DNSSEC PCAP Report</title>
+      <style>
+    body{font-family:system-ui,Segoe UI,Arial,sans-serif;margin:24px;line-height:1.35;background:#0b1220;color:#e6eefc}
+    h1,h2,h3{margin:0 0 12px 0}
+    .muted{opacity:.75}
+    .card{background:#111b31;border:1px solid #223055;border-radius:12px;padding:14px;margin:12px 0}
+    details{background:#0f1830;border:1px solid #223055;border-radius:12px;padding:10px;margin:10px 0}
+    summary{cursor:pointer;font-weight:600}
+    table{border-collapse:collapse;width:100%;margin:10px 0;font-size:14px}
+    th,td{border:1px solid #223055;padding:7px;vertical-align:top}
+    th{background:#172445}
+    pre{white-space:pre-wrap;word-break:break-all;background:#0b1220;border:1px solid #223055;border-radius:10px;padding:10px}
+    .section{margin:12px 0}
+    .rrset{margin:8px 0}
+    .toolbar{display:flex;gap:10px;align-items:center}
+    input{padding:8px 10px;border-radius:10px;border:1px solid #223055;background:#0b1220;color:#e6eefc;width:420px}
+    </style>
+    </head>
+    <body>
+      <h1>DNS/DNSSEC PCAP Report</h1>
+      <div class="muted">PCAP: G:\Applications-2026-02-25-aspirepl2\scripts\pcaps\authoritative-20260301-190718.pcap | Frames parsed: 4</div>
+
+      <div class="card toolbar">
+        <div><strong>Filter frames:</strong></div>
+        <input id="filter" oninput="applyFilter()" placeholder="type e.g. example.test, DNSKEY, RRSIG, NXDOMAIN..." />
+      </div>
+
+      <div class="card">
+        <h2>DNSSEC artifacts (deduplicated)</h2>
+        <h3>DNSKEY (KSK/ZSK)</h3>
+        <table><thead><tr><th>zone</th><th>key_tag</th><th>role</th><th>flags</th><th>alg</th><th>proto</th><th>key_bits</th><th>seen</th></tr></thead><tbody><tr><td>example.test</td><td>2860</td><td>KSK</td><td>257</td><td>13</td><td>3</td><td>512</td><td>172.31.0.11-&gt;172.31.0.20</td></tr><tr><td>example.test</td><td>3984</td><td>KSK</td><td>257</td><td>13</td><td>3</td><td>512</td><td>172.31.0.11-&gt;172.31.0.20</td></tr><tr><td>example.test</td><td>58408</td><td>ZSK</td><td>256</td><td>13</td><td>3</td><td>512</td><td>172.31.0.11-&gt;172.31.0.20</td></tr></tbody></table>
+        <h3>DS</h3>
+        <table><thead><tr><th>owner</th><th>key_tag</th><th>alg</th><th>digest_t</th><th>digest_hex</th><th>seen</th></tr></thead><tbody><tr><td>(none)</td><td></td><td></td><td></td><td></td><td></td></tr></tbody></table>
+        <h3>RRSIG</h3>
+        <table><thead><tr><th>owner</th><th>covers</th><th>alg</th><th>key_tag</th><th>signer</th><th>inception</th><th>expiration</th><th>seen</th></tr></thead><tbody><tr><td>example.test</td><td>DNSKEY</td><td>13</td><td>3984</td><td>example.test</td><td>1772382564</td><td>1774974564</td><td>172.31.0.11-&gt;172.31.0.20</td></tr><tr><td>example.test</td><td>DNSKEY</td><td>13</td><td>58408</td><td>example.test</td><td>1772382564</td><td>1774974564</td><td>172.31.0.11-&gt;172.31.0.20</td></tr><tr><td>www.example.test</td><td>A</td><td>13</td><td>58408</td><td>example.test</td><td>1772382564</td><td>1774974564</td><td>172.31.0.11-&gt;172.31.0.20</td></tr></tbody></table>
+      </div>
+
+      <div class="card">
+        <h2>Frames</h2>
+        <div class="muted">Click a frame to expand. Inside, click RRsets to expand.</div>
+        <details class='frame'><summary>Frame 1 | UDP | 172.31.0.20 → 172.31.0.11 | www.example.test A | rcode=NOERROR | flags=CD</summary><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Transaction ID</td><td>0x990e</td></tr><tr><td>Opcode</td><td>QUERY</td></tr><tr><td>Rcode</td><td>NOERROR</td></tr><tr><td>Flags</td><td>CD</td></tr><tr><td>QD/AN/NS/AR (rrsets)</td><td>1/0/0/0</td></tr><tr><td>EDNS</td><td>yes</td></tr><tr><td>EDNS flags</td><td>-</td></tr><tr><td>UDP payload (EDNS)</td><td>1232</td></tr><tr><td>Timestamp (UTC)</td><td>2026-03-01T19:07:18.911602+00:00</td></tr></tbody></table><div class='section'><h4>Question</h4><details class='rrset'><summary>www.example.test  TTL=0  A  (0 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody></tbody></table></details></div><div class='section'><h4>Answer</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Authority</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Additional</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Raw DNS wire (hex)</h4><pre>990e0010000100000000000103777777076578616d706c650474657374000001000100002904d0000080000000</pre></div></details>
+<details class='frame'><summary>Frame 2 | UDP | 172.31.0.11 → 172.31.0.20 | www.example.test A | rcode=NOERROR | flags=QR AA CD</summary><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Transaction ID</td><td>0x990e</td></tr><tr><td>Opcode</td><td>QUERY</td></tr><tr><td>Rcode</td><td>NOERROR</td></tr><tr><td>Flags</td><td>QR AA CD</td></tr><tr><td>QD/AN/NS/AR (rrsets)</td><td>1/2/0/0</td></tr><tr><td>EDNS</td><td>yes</td></tr><tr><td>EDNS flags</td><td>-</td></tr><tr><td>UDP payload (EDNS)</td><td>1232</td></tr><tr><td>Timestamp (UTC)</td><td>2026-03-01T19:07:18.911720+00:00</td></tr></tbody></table><div class='section'><h4>Question</h4><details class='rrset'><summary>www.example.test  TTL=0  A  (0 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody></tbody></table></details></div><div class='section'><h4>Answer</h4><details class='rrset'><summary>www.example.test  TTL=300  A  (1 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody><tr><td>-</td><td>172.31.0.11</td></tr></tbody></table></details><details class='rrset'><summary>www.example.test  TTL=300  RRSIG  (1 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody><tr><td>algorithm=13, key_tag=58408, type_covered=A, labels=3, original_ttl=300, inception=1772382564, expiration=1774974564, signer=example.test</td><td>A 13 3 300 20260331162924 20260301162924 58408 example.test. api3UJZQDmcgaW1kfYqi65gY8GaaS8yh EE/UmyhfrfgXHO2b9QiPgN8mQHopeB77 Bg87/OMP6x5X3ECUWB2Hkw==</td></tr></tbody></table></details></div><div class='section'><h4>Authority</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Additional</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Raw DNS wire (hex)</h4><pre>990e8410000100020000000103777777076578616d706c6504746573740000010001c00c000100010000012c0004ac1f000bc00c002e00010000012c006000010d030000012c69cbf66469a46964e428076578616d706c650474657374006a98b75096500e6720696d647d8aa2eb9818f0669a4bcca1104fd49b285fadf8171ced9bf5088f80df26407a29781efb060f3bfce30feb1e57dc4094581d879300002904d0000080000000</pre></div></details>
+<details class='frame'><summary>Frame 3 | UDP | 172.31.0.20 → 172.31.0.11 | example.test DNSKEY | rcode=NOERROR | flags=CD</summary><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Transaction ID</td><td>0xd220</td></tr><tr><td>Opcode</td><td>QUERY</td></tr><tr><td>Rcode</td><td>NOERROR</td></tr><tr><td>Flags</td><td>CD</td></tr><tr><td>QD/AN/NS/AR (rrsets)</td><td>1/0/0/0</td></tr><tr><td>EDNS</td><td>yes</td></tr><tr><td>EDNS flags</td><td>-</td></tr><tr><td>UDP payload (EDNS)</td><td>1232</td></tr><tr><td>Timestamp (UTC)</td><td>2026-03-01T19:07:18.917739+00:00</td></tr></tbody></table><div class='section'><h4>Question</h4><details class='rrset'><summary>example.test  TTL=0  DNSKEY  (0 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody></tbody></table></details></div><div class='section'><h4>Answer</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Authority</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Additional</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Raw DNS wire (hex)</h4><pre>d22000100001000000000001076578616d706c650474657374000030000100002904d0000080000000</pre></div></details>
+<details class='frame'><summary>Frame 4 | UDP | 172.31.0.11 → 172.31.0.20 | example.test DNSKEY | rcode=NOERROR | flags=QR AA CD</summary><table><thead><tr><th>Field</th><th>Value</th></tr></thead><tbody><tr><td>Transaction ID</td><td>0xd220</td></tr><tr><td>Opcode</td><td>QUERY</td></tr><tr><td>Rcode</td><td>NOERROR</td></tr><tr><td>Flags</td><td>QR AA CD</td></tr><tr><td>QD/AN/NS/AR (rrsets)</td><td>1/2/0/0</td></tr><tr><td>EDNS</td><td>yes</td></tr><tr><td>EDNS flags</td><td>-</td></tr><tr><td>UDP payload (EDNS)</td><td>1232</td></tr><tr><td>Timestamp (UTC)</td><td>2026-03-01T19:07:18.918068+00:00</td></tr></tbody></table><div class='section'><h4>Question</h4><details class='rrset'><summary>example.test  TTL=0  DNSKEY  (0 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody></tbody></table></details></div><div class='section'><h4>Answer</h4><details class='rrset'><summary>example.test  TTL=3600  DNSKEY  (3 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody><tr><td>flags=256, protocol=3, algorithm=13, key_tag=58408</td><td>256 3 13 di9PGNiFGYmUznA5FFVf3whaKxk4ULLH /X1bjgdxxFbJj+POAUNP8e59TTxaPUYp R62PCD6ptqAKwhyQ7kev2w==</td></tr><tr><td>flags=257, protocol=3, algorithm=13, key_tag=2860</td><td>257 3 13 9LSr/9K7uAL7VS4yQPgPlIJrM+r3fZOH KlbjpaXhzSyBC2l9TZGwjiRjOqLEK+2v 63flRkTcWvehlg7lAlmCPw==</td></tr><tr><td>flags=257, protocol=3, algorithm=13, key_tag=3984</td><td>257 3 13 72KJS6qL7DQ/sROs4+8dSC/ProCljwQz bqjfszDjanVovdsbS5N+kTRbpB+wQByI s87TyAUHDRTSNKZgXicSBQ==</td></tr></tbody></table></details><details class='rrset'><summary>example.test  TTL=3600  RRSIG  (2 rdata)</summary><table><thead><tr><th>parsed</th><th>rdata (text)</th></tr></thead><tbody><tr><td>algorithm=13, key_tag=3984, type_covered=DNSKEY, labels=2, original_ttl=3600, inception=1772382564, expiration=1774974564, signer=example.test</td><td>DNSKEY 13 2 3600 20260331162924 20260301162924 3984 example.test. TigC/7XWj5+I3SRwMnJr0dUOS1yVqcTy x2Y5boTllM2dVEagHuoqYdjrjVbUSAp0 WG/aXyBPbiagu781ug+dBw==</td></tr><tr><td>algorithm=13, key_tag=58408, type_covered=DNSKEY, labels=2, original_ttl=3600, inception=1772382564, expiration=1774974564, signer=example.test</td><td>DNSKEY 13 2 3600 20260331162924 20260301162924 58408 example.test. c5XA//LjbYau7iQYle3u2faUXxc+epP9 K5RINw5msCkIPYUlfSSfg0/fVPYLY6ky PF4w4smwM8H97bRALC62bQ==</td></tr></tbody></table></details></div><div class='section'><h4>Authority</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Additional</h4><div class='muted'>(empty)</div></div><div class='section'><h4>Raw DNS wire (hex)</h4><pre>d22084100001000500000001076578616d706c6504746573740000300001c00c0030000100000e1000440100030d762f4f18d885198994ce703914555fdf085a2b193850b2c7fd7d5b8e0771c456c98fe3ce01434ff1ee7d4d3c5a3d462947ad8f083ea9b6a00ac21c90ee47afdbc00c0030000100000e1000440101030df4b4abffd2bbb802fb552e3240f80f94826b33eaf77d93872a56e3a5a5e1cd2c810b697d4d91b08e24633aa2c42bedafeb77e54644dc5af7a1960ee50259823fc00c0030000100000e1000440101030def62894baa8bec343fb113ace3ef1d482fcfae80a58f04336ea8dfb330e36a7568bddb1b4b937e91345ba41fb0401c88b3ced3c805070d14d234a6605e271205c00c002e000100000e10006000300d0200000e1069cbf66469a469640f90076578616d706c650474657374004e2802ffb5d68f9f88dd247032726bd1d50e4b5c95a9c4f2c766396e84e594cd9d5446a01eea2a61d8eb8d56d4480a74586fda5f204f6e26a0bbbf35ba0f9d07c00c002e000100000e10006000300d0200000e1069cbf66469a46964e428076578616d706c650474657374007395c0fff2e36d86aeee241895edeed9f6945f173e7a93fd2b9448370e66b029083d85257d249f834fdf54f60b63a9323c5e30e2c9b033c1fdedb4402c2eb66d00002904d0000080000000</pre></div></details>
+      </div>
+
+      <script>
+    function applyFilter(){
+      const q = document.getElementById('filter').value.toLowerCase();
+      const frames = document.querySelectorAll('details.frame');
+      frames.forEach(d=>{
+        const txt = d.querySelector('summary').innerText.toLowerCase();
+        d.style.display = (txt.includes(q)) ? '' : 'none';
+      });
+    }
+    </script>
+    </body>
+    </html>
+    

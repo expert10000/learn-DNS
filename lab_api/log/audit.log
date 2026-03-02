@@ -111,3 +111,26 @@
 {"ts": "2026-03-01T16:28:07.488022+00:00", "ip": "172.34.0.1", "path": "/controls/apply", "action": "controls_apply", "detail": {"unbound": true, "bind": true}}
 {"ts": "2026-03-01T16:28:49.720885+00:00", "ip": "172.34.0.1", "path": "/perf/dnsperf", "action": "perf_dnsperf", "detail": {"target": "resolver_valid", "duration_s": 30, "qps": 100, "max_queries": 1000, "ok": true}}
 {"ts": "2026-03-01T16:29:09.754006+00:00", "ip": "172.34.0.1", "path": "/perf/resperf", "action": "perf_resperf", "detail": {"target": "resolver_valid", "max_qps": 200, "ramp_qps": 15, "ok": true}}
+{"ts": "2026-03-01T19:07:18.517834+00:00", "ip": "172.34.0.1", "path": "/capture/start", "action": "capture_start", "detail": {"target": "resolver", "filter": "dns"}}
+{"ts": "2026-03-01T19:07:18.869443+00:00", "ip": "172.34.0.1", "path": "/capture/start", "action": "capture_start", "detail": {"target": "authoritative", "filter": "dns"}}
+{"ts": "2026-03-01T19:07:21.044717+00:00", "ip": "172.34.0.1", "path": "/capture/stop", "action": "capture_stop", "detail": {"target": "resolver", "file": "resolver-20260301-190718.pcap"}}
+{"ts": "2026-03-01T19:07:23.155551+00:00", "ip": "172.34.0.1", "path": "/capture/stop", "action": "capture_stop", "detail": {"target": "authoritative", "file": "authoritative-20260301-190718.pcap"}}
+{"ts": "2026-03-02T09:59:26.381771+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": false, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T09:59:13.283416+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": "dkim"}}
+{"ts": "2026-03-02T10:02:24.085474+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": false, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T10:03:48.710748+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": "dkim"}}
+{"ts": "2026-03-02T10:06:03.890708+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": false, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T10:06:32.380255+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": "dkim"}}
+{"ts": "2026-03-02T10:10:28.546808+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": false, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T10:10:53.053147+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": ""}}
+{"ts": "2026-03-02T10:13:50.799761+00:00", "ip": "172.34.0.1", "path": "/resolver/restart", "action": "resolver_restart", "detail": {"ok": true}}
+{"ts": "2026-03-02T10:13:56.901520+00:00", "ip": "172.34.0.1", "path": "/capture/start", "action": "capture_start", "detail": {"target": "authoritative", "filter": "dns"}}
+{"ts": "2026-03-02T10:14:09.575275+00:00", "ip": "172.34.0.1", "path": "/capture/stop", "action": "capture_stop", "detail": {"target": "authoritative", "file": "authoritative-20260302-101428.pcap"}}
+{"ts": "2026-03-02T10:15:28.384498+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": false, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T10:16:11.567633+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": "dkim"}}
+{"ts": "2026-03-02T10:23:42.552460+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": true, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T10:24:05.891608+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": "dkim"}}
+{"ts": "2026-03-02T10:33:16.278029+00:00", "ip": "172.34.0.1", "path": "/email/logs", "action": "email_logs", "detail": {"ok": true, "grep": "dkim"}}
+{"ts": "2026-03-02T10:33:29.636472+00:00", "ip": "172.34.0.1", "path": "/email/imap-check", "action": "email_imap_check", "detail": {"ok": true, "user": "user@example.test", "mailbox": "INBOX", "limit": 40}}
+{"ts": "2026-03-02T10:33:43.526054+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": true, "to": "user@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
+{"ts": "2026-03-02T10:33:52.400514+00:00", "ip": "172.34.0.1", "path": "/email/imap-check", "action": "email_imap_check", "detail": {"ok": true, "user": "user@example.test", "mailbox": "INBOX", "limit": 40}}

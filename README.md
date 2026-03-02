@@ -18,6 +18,8 @@ The resolvers only allow recursion from the trusted and mgmt subnets.
 - `untrusted`: untrusted client API (FastAPI) that runs `dig` from the untrusted segment.
 - `mgmt_client`: management client API (FastAPI) for the mgmt segment.
 - `toolbox`: optional netshoot container for troubleshooting.
+- `mailserver`: Docker Mailserver for `example.test` (SMTP/IMAP for mail lab).
+- `swaks`: test client for sending mail inside the lab (local build in `swaks/`).
 - `lab_api`: management API (FastAPI) for logs and optional dig execution.
 - Packet capture runs via `tcpdump` inside the resolver and authoritative child containers (triggered by `lab_api`).
 - `anchor_export`: one-shot helper that writes the parent trust anchor to `anchors/test.key`.
@@ -37,6 +39,50 @@ The resolvers only allow recursion from the trusted and mgmt subnets.
 - Validating resolver is published to host localhost only: `127.0.0.1:5300` (TCP/UDP 53).
 - Plain resolver is published to host localhost only: `127.0.0.1:5301` (TCP/UDP 53).
 - React UI is published to host: `http://localhost:5173`.
+- Mailserver is published to host localhost only:
+  - SMTP: `127.0.0.1:2525`
+  - Submission: `127.0.0.1:1587`
+  - SMTPS: `127.0.0.1:1465`
+  - IMAP: `127.0.0.1:1143`
+  - IMAPS: `127.0.0.1:1993`
+
+## Mail Lab (MX/SPF/DKIM)
+This lab also includes a self-contained mail flow for `example.test`:
+- DNS: `MX`, `SPF`, and `DKIM` are published in the `example.test` zone.
+- SMTP server: Docker Mailserver (`mail.example.test`).
+- Test sender: `swaks` container.
+- UI: Email tab can send and inspect DKIM logs.
+
+Quick start:
+1. `docker compose up -d --build mailserver swaks`
+2. Create mailbox:
+   `docker compose exec mailserver setup email add user@example.test`
+3. Open `http://localhost:5173` → Email tab:
+   - From/To: `user@example.test`
+   - Server: `mail.example.test`, Port: `25`, TLS: `None`
+   - Click **Send Email** and **Load DKIM Logs**
+4. Optional IMAP check (message delivery):
+   `openssl s_client -connect 127.0.0.1:1993 -crlf`
+   Then:
+   `a login user@example.test <password>`
+   `a select INBOX`
+   `a fetch 1:* (FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO DATE)])`
+   `a logout`
+
+CLI alternative (inside the swaks container):
+```bash
+docker compose exec swaks swaks \
+  --to user@example.test \
+  --from user@example.test \
+  --server mail.example.test \
+  --port 25 \
+  --header "Subject: DNS lab test" \
+  --body "Hello from the DNS lab."
+```
+
+Notes:
+- On Windows hosts, Postfix queue state should be stored in a named volume
+  (see `mailserver_state` in `docker-compose.yml`) to avoid “queue file write error”.
 
 ## API & UI (New Architecture)
 - Per-client FastAPI agents run inside the segmented networks.

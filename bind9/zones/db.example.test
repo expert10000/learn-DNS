@@ -1,6 +1,6 @@
 $TTL 300
 @   IN SOA ns-child.test. admin.example.test. (
-        2026022703 ; serial
+        2026030203 ; serial
         1h         ; refresh
         15m        ; retry
         1w         ; expire
@@ -8,6 +8,20 @@ $TTL 300
 )
     IN NS  ns-child.test.
     IN NSEC3PARAM 1 0 10 A1B2
+    IN MX 10 mail.example.test.
 
 ns1 IN A   172.31.0.11
 www IN A   172.31.0.11
+mail IN A  172.32.0.25
+
+; ===== SPF (TXT dla domeny) =====
+@   IN TXT "v=spf1 ip4:172.32.0.25 -all"
+
+; (opcjonalnie) SPF dla subdomeny "mail"
+mail IN TXT "v=spf1 ip4:172.32.0.25 -all"
+
+; ===== DKIM (TXT pod selektorem) =====
+mail._domainkey IN TXT (
+    "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAjqAE3TfmUzCHS18i8l7Voz7ZWLXZlwWvSdsoIUQ7Bsr52wHOf2biSJkeGHLNTHPNeBUTaYGpvDSYiaFHqaczhq2Y2r5stYnJfu6HJ4jnjnypIP8f4okpK0BurYZ0RqB2B9Tza1tNxk14Ys8uk6vcO15QEfLQ"
+    "tfuSyvz8o//hUtr0uQkcxq1Kn8GxRwhKXNVPUfS3GKB7WJ9beD/Hovk8ar9ACbUebUbm5OaIuUqFt9VBVbwXRGBNxEnXX3Uxymc8EnnLgs6meB4sKEvDEdj+50Iza4JEOe1+ytGcsuel6WK/UT1UNCVwiNoqG+635AgRA//5w13f8rA4UCkWe23bvwIDAQAB"
+)

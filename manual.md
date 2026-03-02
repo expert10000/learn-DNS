@@ -266,6 +266,76 @@ docker compose exec perf_tools sh -lc "apt-get update && apt-get install -y gnup
 
 ---
 
+## 3.5) Mail Lab (MX / SPF / DKIM)
+
+### What this validates
+- **MX**: which host receives mail for `example.test`
+- **SPF**: which IPs are allowed to send for the domain
+- **DKIM**: cryptographic signature added by the mail server
+
+### Where DNS records live
+- Zone file: `bind9/zones/db.example.test`
+- MX: `example.test -> mail.example.test`
+- SPF: TXT record at zone apex
+- DKIM: TXT record at `mail._domainkey.example.test`
+
+### Start services
+```bash
+docker compose up -d --build mailserver swaks
+docker compose exec mailserver setup email add user@example.test
+```
+
+### UI flow (recommended)
+- Open `http://localhost:5173` → Email tab.
+- From/To: `user@example.test`
+- Server: `mail.example.test`, Port: `25`, TLS: `None`
+- Click **Send Email**, then **Load DKIM Logs**.
+
+Expected:
+- SMTP returns `250 2.0.0 Ok: queued as ...`
+- DKIM log shows `DKIM-Signature field added (s=mail, d=example.test)`
+
+### CLI flow (swaks)
+```bash
+docker compose exec swaks swaks \
+  --to user@example.test \
+  --from user@example.test \
+  --server mail.example.test \
+  --port 25 \
+  --header "Subject: DNS lab test" \
+  --body "Hello from the DNS lab."
+```
+
+Check logs:
+```bash
+docker compose exec mailserver tail -n 200 /var/log/mail/mail.log | grep -i dkim
+docker compose exec mailserver tail -n 200 /var/log/mail/mail.log | grep -i postfix
+```
+
+### IMAP check (optional)
+If you want to verify the message arrived in the mailbox:
+```bash
+openssl s_client -connect 127.0.0.1:1993 -crlf
+```
+Then run IMAP commands (use the password you set for the mailbox):
+```
+a login user@example.test <password>
+a select INBOX
+a fetch 1:* (FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO DATE)])
+a logout
+```
+
+### Notes / gotchas
+- On Windows, bind-mounted mail state can cause `queue file write error`.
+  Use the named volume `mailserver_state` in `docker-compose.yml`.
+- If you regenerate DKIM keys with:
+  `docker compose exec mailserver setup config dkim`
+  then update the DNS TXT record in `bind9/zones/db.example.test`
+  (copy from `/tmp/docker-mailserver/opendkim/keys/example.test/mail.txt`)
+  and re-sign the zone.
+
+---
+
 ## 4) Smoke test script (PASS/FAIL)
 
 ### 4.1 Save on host as `smoke_test_dns_lab.sh`

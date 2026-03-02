@@ -9,6 +9,28 @@ This document describes the key rotation behavior that is actually implemented i
 - Non-validating resolver: Unbound without trust anchor (`unbound/unbound.plain.conf`)
 - DS management: helper script + one-shot service (`scripts/recompute_ds.py`, `docker-compose.yml`)
 
+## Mail DNS Records (MX / SPF / DKIM) — Lab Add-on
+The lab also includes a mail flow for `example.test`. The DNS side is defined
+in the child zone file: `bind9/zones/db.example.test`.
+
+Records used:
+- **MX**: `example.test. IN MX 10 mail.example.test.`
+- **A**: `mail.example.test. IN A 172.32.0.25`
+- **SPF**: `example.test. IN TXT "v=spf1 ip4:172.32.0.25 -all"`
+- **DKIM**: `mail._domainkey.example.test. IN TXT "..."`
+
+Theory (quick):
+- **MX** tells senders where to deliver mail for the domain.
+- **SPF** tells receivers which IPs are allowed to send mail for the domain.
+- **DKIM** is a cryptographic signature added by the sender; the public key
+  is published in DNS under `selector._domainkey.domain`.
+
+Operational notes:
+- If you regenerate DKIM keys with `docker compose exec mailserver setup config dkim`,
+  update the DKIM TXT record from:
+  `/tmp/docker-mailserver/opendkim/keys/example.test/mail.txt`
+  and re-sign the zone.
+
 ## What We Actually Implement
 - BIND auto-signing with the default DNSSEC policy for both parent and child zones:
   - `dnssec-policy default;`

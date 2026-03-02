@@ -13,6 +13,7 @@ type SectionId =
   | 'output'
   | 'dnssec'
   | 'privacy'
+  | 'email'
   | 'availability'
   | 'perf'
   | 'limits'
@@ -63,6 +64,8 @@ type OutputView = {
 type ConfigGroup = 'authoritative' | 'resolver';
 type ConfigServer = 'child' | 'parent' | 'resolver' | 'plain';
 type PrivacyTab = 'overview' | 'dot' | 'doh' | 'logs';
+type EmailTlsMode = 'none' | 'starttls' | 'tls';
+type EmailAuthType = 'AUTO' | 'LOGIN' | 'PLAIN' | 'CRAM-MD5';
 
 type ConfigFile = {
   path: string;
@@ -184,6 +187,31 @@ type PrivacyCheckResponse = {
   response_bytes: number;
   elapsed_ms: number;
   detail?: string;
+};
+
+type EmailSendResponse = {
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
+type EmailLogResponse = {
+  ok: boolean;
+  file: string;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
+type EmailImapResponse = {
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
 };
 
 type AvailabilityMetricsResponse = {
@@ -645,6 +673,7 @@ const SECTION_TABS: { id: SectionId; label: string }[] = [
   { id: 'output', label: 'Output' },
   { id: 'dnssec', label: 'DNSSEC' },
   { id: 'privacy', label: 'Privacy' },
+  { id: 'email', label: 'Email' },
   { id: 'availability', label: 'Availability' },
   { id: 'perf', label: 'Perf' },
   { id: 'limits', label: 'Service Limits' },
@@ -1014,6 +1043,27 @@ export default function App() {
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [privacyStatus, setPrivacyStatus] = useState('');
   const [privacyOutput, setPrivacyOutput] = useState('');
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailStatus, setEmailStatus] = useState('');
+  const [emailOutput, setEmailOutput] = useState('');
+  const [emailLog, setEmailLog] = useState('');
+  const [emailLogFile, setEmailLogFile] = useState('');
+  const [emailLogTail, setEmailLogTail] = useState(200);
+  const [emailLogFilter, setEmailLogFilter] = useState('dkim');
+  const [emailImapMailbox, setEmailImapMailbox] = useState('INBOX');
+  const [emailImapLimit, setEmailImapLimit] = useState(40);
+  const [emailImapOutput, setEmailImapOutput] = useState('');
+  const [emailFrom, setEmailFrom] = useState('user@example.test');
+  const [emailTo, setEmailTo] = useState('user@example.test');
+  const [emailSubject, setEmailSubject] = useState('DNS lab test');
+  const [emailBody, setEmailBody] = useState('Hello from the DNS lab.');
+  const [emailServer, setEmailServer] = useState('mail.example.test');
+  const [emailPort, setEmailPort] = useState(25);
+  const [emailTlsMode, setEmailTlsMode] = useState<EmailTlsMode>('none');
+  const [emailUseAuth, setEmailUseAuth] = useState(false);
+  const [emailAuthUser, setEmailAuthUser] = useState('user@example.test');
+  const [emailAuthPass, setEmailAuthPass] = useState('');
+  const [emailAuthType, setEmailAuthType] = useState<EmailAuthType>('AUTO');
   const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [availabilityStatus, setAvailabilityStatus] = useState('');
   const [availabilityOutput, setAvailabilityOutput] = useState('');
@@ -1242,6 +1292,74 @@ export default function App() {
 
   const runDig = async () => {
     await runDigWithRequest(req, 'Running dig...');
+  };
+
+  const runDigWithCapture = async () => {
+    if (missingLabKey) {
+      setStatus('Missing Lab API key.');
+      return;
+    }
+    setIsBusy(true);
+    setStatus('Starting resolver + authoritative captures...');
+    setOutput(null);
+
+    const startedTargets: CaptureTarget[] = [];
+    const captureFiles: string[] = [];
+
+    try {
+      const resolverCapture = await postJson<CaptureStartResponse>(
+        `${LAB_API_BASE}/capture/start`,
+        { target: 'resolver', filter: captureFilter },
+        labHeaders
+      );
+      startedTargets.push('resolver');
+      captureFiles.push(resolverCapture.file);
+
+      const authCapture = await postJson<CaptureStartResponse>(
+        `${LAB_API_BASE}/capture/start`,
+        { target: 'authoritative', filter: captureFilter },
+        labHeaders
+      );
+      startedTargets.push('authoritative');
+      captureFiles.push(authCapture.file);
+
+      setStatus('Captures running. Executing dig...');
+      const result = await executeDigRequest(req);
+      setOutput(result.output);
+      const captureNote =
+        captureFiles.length > 0 ? ` • Captures: ${captureFiles.join(', ')}` : '';
+      setStatus(
+        result.ok
+          ? `${formatStatusLabel(result.rcode, result.ad)}${captureNote}`
+          : `Completed with errors${captureNote}`
+      );
+    } catch (err) {
+      setOutput(null);
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setStatus,
+        (value) => setOutput({ ok: false, command: 'diagnostics', text: value })
+      );
+    } finally {
+      for (const target of startedTargets) {
+        try {
+          await postJson<CaptureStopResponse>(
+            `${LAB_API_BASE}/capture/stop`,
+            { target },
+            labHeaders
+          );
+        } catch {
+          // ignore stop errors
+        }
+      }
+      if (startedTargets.length > 0) {
+        await loadCaptures();
+      }
+      if (outputRef.current) {
+        outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      setIsBusy(false);
+    }
   };
 
   const executeDigRequest = async (
@@ -2254,6 +2372,114 @@ export default function App() {
     }
   };
 
+  const formatCommandOutput = (
+    command: string,
+    stdout: string,
+    stderr: string
+  ) => {
+    const blocks = [`Command:\n${command}`];
+    if (stdout.trim()) {
+      blocks.push(`STDOUT:\n${stdout.trimEnd()}`);
+    }
+    if (stderr.trim()) {
+      blocks.push(`STDERR:\n${stderr.trimEnd()}`);
+    }
+    return blocks.join('\n\n');
+  };
+
+  const sendEmail = async () => {
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Sending mail...');
+    setEmailOutput('');
+    try {
+      const payload: Record<string, unknown> = {
+        to: emailTo,
+        from: emailFrom,
+        subject: emailSubject,
+        body: emailBody,
+        server: emailServer,
+        port: emailPort,
+        tls_mode: emailTlsMode,
+      };
+      if (emailUseAuth) {
+        payload.auth_user = emailAuthUser;
+        payload.auth_password = emailAuthPass;
+        payload.auth_type = emailAuthType;
+      }
+      const res = await postJson<EmailSendResponse>(
+        `${LAB_API_BASE}/email/send`,
+        payload,
+        labHeaders
+      );
+      setEmailOutput(formatCommandOutput(res.command, res.stdout, res.stderr));
+      setEmailStatus(res.ok ? 'Mail sent.' : 'Mail send failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const loadEmailLogs = async (filterOverride?: string) => {
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Loading mail logs...');
+    try {
+      const filterValue = filterOverride ?? emailLogFilter;
+      const params = new URLSearchParams({
+        tail: String(emailLogTail),
+      });
+      if (filterValue.trim()) {
+        params.set('grep', filterValue.trim());
+      }
+      const res = await getJson<EmailLogResponse>(
+        `${LAB_API_BASE}/email/logs?${params.toString()}`,
+        labHeaders
+      );
+      setEmailLogFile(res.file);
+      setEmailLog(formatCommandOutput(res.command, res.stdout, res.stderr));
+      setEmailStatus(res.ok ? 'Logs loaded.' : 'Mail log read failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const checkImap = async () => {
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Checking IMAP (headers)...');
+    setEmailImapOutput('');
+    try {
+      const res = await postJson<EmailImapResponse>(
+        `${LAB_API_BASE}/email/imap-check`,
+        {
+          user: emailTo,
+          mailbox: emailImapMailbox,
+          limit: emailImapLimit,
+        },
+        labHeaders
+      );
+      setEmailImapOutput(formatCommandOutput(res.command, res.stdout, res.stderr));
+      setEmailStatus(res.ok ? 'IMAP check complete.' : 'IMAP check failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
   const setPrivacyName = (name: string) => {
     setReq((prev) => ({ ...prev, name, qtype: 'A' }));
     setPrivacyStatus(`Privacy query set to ${name}.`);
@@ -3199,6 +3425,18 @@ export default function App() {
             </select>
           </label>
 
+          <label>
+            Capture filter
+            <select
+              value={captureFilter}
+              onChange={(e) => setCaptureFilter(e.target.value as CaptureFilter)}
+            >
+              <option value="dns">dns (53)</option>
+              <option value="dns+dot">dns+dot (53, 853)</option>
+              <option value="all">all traffic</option>
+            </select>
+          </label>
+
           <label className="toggle">
             <input
               type="checkbox"
@@ -3231,6 +3469,9 @@ export default function App() {
           <button onClick={runDig} disabled={isBusy}>
             Run Dig
           </button>
+          <button onClick={runDigWithCapture} disabled={isBusy || missingLabKey}>
+            Run Dig + Capture
+          </button>
           <button onClick={checkHealth} disabled={isBusy}>
             Health
           </button>
@@ -3253,6 +3494,21 @@ delv @127.0.0.1 -p 5300 ${req.name} ${req.qtype}
 
 # Plain resolver (host)
 dig @127.0.0.1 -p 5301 ${req.name} ${req.qtype}`}</pre>
+
+        <div className="section-title">PowerShell shortcuts (host)</div>
+        <div className="hint">
+          Use <code>nslookup</code> to target host-mapped ports (5300/5301).
+          KSK/ZSK are DNSKEY records; check DNSKEY flags (257 = KSK, 256 = ZSK).
+        </div>
+        <pre className="output compact">{`# Validating resolver (host)
+nslookup -port=5300 -type=A ${req.name} 127.0.0.1
+nslookup -port=5300 -type=SOA example.test 127.0.0.1
+nslookup -port=5300 -type=DNSKEY example.test 127.0.0.1
+nslookup -port=5300 -type=DS example.test 127.0.0.1
+
+# Plain resolver (host)
+nslookup -port=5301 -type=A ${req.name} 127.0.0.1
+nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
 
         <div className="status">{status || 'Ready.'}</div>
       </section>
@@ -3713,6 +3969,219 @@ dig @127.0.0.1 -p 5301 ${req.name} ${req.qtype}`}</pre>
       <pre className="output">{privacyOutput || 'No privacy checks yet.'}</pre>
     </section>
     )}
+
+      {isSectionVisible('email') && (
+      <section className="card" id="email">
+        <div className="card-title">Mail Delivery Lab</div>
+        <div className="hint">
+          <div>
+            Send test emails through the internal mail server and inspect DKIM/SPF
+            results in the mail logs.
+          </div>
+          <div>
+            Create a mailbox first:{' '}
+            <code>docker compose exec mailserver setup email add user@example.test</code>
+          </div>
+        </div>
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="grid">
+          <label>
+            From
+            <input
+              value={emailFrom}
+              onChange={(e) => setEmailFrom(e.target.value)}
+              disabled={emailBusy}
+            />
+          </label>
+          <label>
+            To
+            <input
+              value={emailTo}
+              onChange={(e) => setEmailTo(e.target.value)}
+              disabled={emailBusy}
+            />
+          </label>
+          <label>
+            Server
+            <input
+              value={emailServer}
+              onChange={(e) => setEmailServer(e.target.value)}
+              disabled={emailBusy}
+            />
+          </label>
+          <label>
+            Port
+            <input
+              type="number"
+              min={1}
+              max={65535}
+              value={emailPort}
+              onChange={(e) => setEmailPort(Number(e.target.value))}
+              disabled={emailBusy}
+            />
+          </label>
+        </div>
+        <div className="grid">
+          <label>
+            TLS mode
+            <select
+              value={emailTlsMode}
+              onChange={(e) => setEmailTlsMode(e.target.value as EmailTlsMode)}
+              disabled={emailBusy}
+            >
+              <option value="none">None (port 25)</option>
+              <option value="starttls">STARTTLS (port 587)</option>
+              <option value="tls">TLS (port 465)</option>
+            </select>
+          </label>
+          <label>
+            Subject
+            <input
+              value={emailSubject}
+              onChange={(e) => setEmailSubject(e.target.value)}
+              disabled={emailBusy}
+            />
+          </label>
+        </div>
+        <label>
+          Body
+          <textarea
+            value={emailBody}
+            onChange={(e) => setEmailBody(e.target.value)}
+            disabled={emailBusy}
+          />
+        </label>
+        <div className="toggle-row">
+          <label className="pill-toggle">
+            <input
+              type="checkbox"
+              checked={emailUseAuth}
+              onChange={(e) => setEmailUseAuth(e.target.checked)}
+              disabled={emailBusy}
+            />
+            SMTP auth
+          </label>
+        </div>
+        <div className="grid">
+          <label>
+            Auth user
+            <input
+              value={emailAuthUser}
+              onChange={(e) => setEmailAuthUser(e.target.value)}
+              disabled={emailBusy || !emailUseAuth}
+            />
+          </label>
+          <label>
+            Auth password
+            <input
+              type="password"
+              value={emailAuthPass}
+              onChange={(e) => setEmailAuthPass(e.target.value)}
+              disabled={emailBusy || !emailUseAuth}
+            />
+          </label>
+          <label>
+            Auth type
+            <select
+              value={emailAuthType}
+              onChange={(e) => setEmailAuthType(e.target.value as EmailAuthType)}
+              disabled={emailBusy || !emailUseAuth}
+            >
+              <option value="AUTO">AUTO</option>
+              <option value="LOGIN">LOGIN</option>
+              <option value="PLAIN">PLAIN</option>
+              <option value="CRAM-MD5">CRAM-MD5</option>
+            </select>
+          </label>
+          <label>
+            Log filter
+            <input
+              value={emailLogFilter}
+              onChange={(e) => setEmailLogFilter(e.target.value)}
+              disabled={emailBusy}
+            />
+          </label>
+          <label>
+            Log tail (lines)
+            <input
+              type="number"
+              min={10}
+              max={1000}
+              value={emailLogTail}
+              onChange={(e) => setEmailLogTail(Number(e.target.value))}
+              disabled={emailBusy}
+            />
+          </label>
+          <label>
+            IMAP mailbox
+            <input
+              value={emailImapMailbox}
+              onChange={(e) => setEmailImapMailbox(e.target.value)}
+              disabled={emailBusy}
+            />
+          </label>
+          <label>
+            IMAP lines
+            <input
+              type="number"
+              min={5}
+              max={200}
+              value={emailImapLimit}
+              onChange={(e) => setEmailImapLimit(Number(e.target.value))}
+              disabled={emailBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={sendEmail} disabled={emailBusy || missingLabKey}>
+            Send Email
+          </button>
+          <button onClick={() => loadEmailLogs()} disabled={emailBusy || missingLabKey}>
+            Load Mail Logs
+          </button>
+          <button
+            onClick={() => {
+              setEmailLogFilter('dkim');
+              loadEmailLogs('dkim');
+            }}
+            disabled={emailBusy || missingLabKey}
+          >
+            Load DKIM Logs
+          </button>
+          <button onClick={checkImap} disabled={emailBusy || missingLabKey}>
+            Check IMAP
+          </button>
+        </div>
+        <div className="status">{emailStatus || 'Ready.'}</div>
+        <div className="email-panels">
+          <div className="email-panel">
+            <div className="section-title">Send Output</div>
+            <pre className="output compact">
+              {emailOutput || 'No send output yet.'}
+            </pre>
+          </div>
+          <div className="email-panel">
+            <div className="section-title">Mail Log Tail</div>
+            <div className="email-log-meta">
+              {emailLogFile ? `File: ${emailLogFile}` : 'No log loaded.'}
+            </div>
+            <pre className="output compact">{emailLog || 'No log output yet.'}</pre>
+          </div>
+          <div className="email-panel">
+            <div className="section-title">IMAP Headers</div>
+            <pre className="output compact">
+              {emailImapOutput || 'No IMAP output yet.'}
+            </pre>
+          </div>
+        </div>
+      </section>
+      )}
 
       {isSectionVisible('availability') && (
       <section className="card" id="availability">

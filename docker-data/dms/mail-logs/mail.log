@@ -1,0 +1,195 @@
+2026-03-02T09:58:21.246871+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-02T09:57:49.320099+00:00 mail dovecot: master: Warning: Created dotlock file's timestamp is different than current time (1772445501 vs 1772445469): /var/lib/dovecot/instances
+2026-03-02T09:57:49.546466+00:00 mail opendkim[815]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-02T09:57:50.146541+00:00 mail amavis[859]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-02T09:57:50.146584+00:00 mail amavis[859]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-02T09:57:50.160808+00:00 mail amavis[859]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-02T09:57:50.160845+00:00 mail amavis[859]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-02T09:57:50.165253+00:00 mail amavis[859]: No ext program for   .zoo, tried: zoo
+2026-03-02T09:57:50.165326+00:00 mail amavis[859]: No ext program for   .doc, tried: ripole
+2026-03-02T09:57:50.165541+00:00 mail amavis[859]: No ext program for   .zst, tried: unzstd
+2026-03-02T09:57:50.165569+00:00 mail amavis[859]: No decoder for       .F   
+2026-03-02T09:57:50.165573+00:00 mail amavis[859]: No decoder for       .doc 
+2026-03-02T09:57:50.165576+00:00 mail amavis[859]: No decoder for       .zoo 
+2026-03-02T09:57:50.165578+00:00 mail amavis[859]: No decoder for       .zst 
+2026-03-02T09:57:50.189129+00:00 mail postfix/postfix-script[960]: starting the Postfix mail system
+2026-03-02T09:57:50.559820+00:00 mail postfix/master[961]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-02T09:58:34.784363+00:00 mail postfix/postscreen[1029]: error: open database /var/lib/postfix/postscreen_cache.db: No such file or directory
+2026-03-02T09:58:34.784962+00:00 mail postfix/master[961]: warning: process /usr/lib/postfix/sbin/postscreen pid 1029 killed by signal 11
+2026-03-02T09:58:34.784966+00:00 mail postfix/master[961]: warning: /usr/lib/postfix/sbin/postscreen: bad command startup -- throttling
+2026-03-02T09:59:34.909743+00:00 mail postfix/postscreen[1139]: cache btree:/var/lib/postfix/postscreen_cache full cleanup: retained=0 dropped=0 entries
+2026-03-02T09:59:34.919756+00:00 mail postfix/postscreen[1139]: CONNECT from [172.32.0.26]:58946 to [172.32.0.25]:25
+2026-03-02T09:59:34.919777+00:00 mail postfix/postscreen[1139]: ALLOWLISTED [172.32.0.26]:58946
+2026-03-02T09:59:34.952244+00:00 mail postfix/smtpd[1140]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T09:59:34.953246+00:00 mail postfix/smtpd[1140]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] quit=1 commands=1
+2026-03-02T10:02:23.845209+00:00 mail postfix/postscreen[1343]: CONNECT from [172.32.0.26]:58762 to [172.32.0.25]:25
+2026-03-02T10:02:23.845230+00:00 mail postfix/postscreen[1343]: ALLOWLISTED [172.32.0.26]:58762
+2026-03-02T10:02:23.876562+00:00 mail postfix/smtpd[1344]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:02:23.936980+00:00 mail postfix/smtpd[1344]: E3B5020000005D5A52: client=dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:02:23.937740+00:00 mail postfix/cleanup[1347]: E3B5020000005D5A52: message-id=<20260302100223.000020@355c704db564>
+2026-03-02T10:02:24.027885+00:00 mail opendkim[815]: mail._domainkey.example.test: key data is not secure: /tmp can be read or written by other users
+2026-03-02T10:02:24.027904+00:00 mail opendkim[815]: E3B5020000005D5A52: error loading key 'mail._domainkey.example.test'
+2026-03-02T10:02:24.028032+00:00 mail postfix/cleanup[1347]: E3B5020000005D5A52: milter-reject: END-OF-MESSAGE from dns_swaks.dns-security-lab_client_net[172.32.0.26]: 4.7.1 Service unavailable - try again later; from=<user@example.test> to=<user@example.test> proto=ESMTP helo=<355c704db564>
+2026-03-02T10:02:24.042550+00:00 mail postfix/smtpd[1344]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] ehlo=1 mail=1 rcpt=1 data=0/1 quit=1 commands=4/5
+2026-03-02T10:05:10.913180+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-02T10:05:11.232179+00:00 mail opendkim[208]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-02T10:05:11.876352+00:00 mail postfix/postfix-script[345]: starting the Postfix mail system
+2026-03-02T10:05:11.906459+00:00 mail amavis[254]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-02T10:05:11.906525+00:00 mail amavis[254]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-02T10:05:11.956496+00:00 mail amavis[254]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-02T10:05:11.956526+00:00 mail amavis[254]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-02T10:05:11.960306+00:00 mail amavis[254]: No ext program for   .zoo, tried: zoo
+2026-03-02T10:05:11.960346+00:00 mail amavis[254]: No ext program for   .doc, tried: ripole
+2026-03-02T10:05:11.960475+00:00 mail amavis[254]: No ext program for   .zst, tried: unzstd
+2026-03-02T10:05:11.960498+00:00 mail amavis[254]: No decoder for       .F   
+2026-03-02T10:05:11.960502+00:00 mail amavis[254]: No decoder for       .doc 
+2026-03-02T10:05:11.960504+00:00 mail amavis[254]: No decoder for       .zoo 
+2026-03-02T10:05:11.960507+00:00 mail amavis[254]: No decoder for       .zst 
+2026-03-02T10:05:12.491532+00:00 mail postfix/master[346]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-02T10:06:03.682382+00:00 mail postfix/postscreen[426]: CONNECT from [172.32.0.26]:45936 to [172.32.0.25]:25
+2026-03-02T10:06:03.682401+00:00 mail postfix/postscreen[426]: ALLOWLISTED [172.32.0.26]:45936
+2026-03-02T10:06:03.724805+00:00 mail postfix/smtpd[427]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:06:03.771590+00:00 mail postfix/smtpd[427]: BB6E720000005D5A54: client=dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:06:03.772294+00:00 mail postfix/cleanup[430]: BB6E720000005D5A54: message-id=<20260302100603.000020@dc6c5b7a5360>
+2026-03-02T10:06:03.833050+00:00 mail opendkim[208]: mail._domainkey.example.test: key data is not secure: /tmp can be read or written by other users
+2026-03-02T10:06:03.833076+00:00 mail opendkim[208]: BB6E720000005D5A54: error loading key 'mail._domainkey.example.test'
+2026-03-02T10:06:03.833236+00:00 mail postfix/cleanup[430]: BB6E720000005D5A54: milter-reject: END-OF-MESSAGE from dns_swaks.dns-security-lab_client_net[172.32.0.26]: 4.7.1 Service unavailable - try again later; from=<user@example.test> to=<user@example.test> proto=ESMTP helo=<dc6c5b7a5360>
+2026-03-02T10:06:03.857067+00:00 mail postfix/smtpd[427]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] ehlo=1 mail=1 rcpt=1 data=0/1 quit=1 commands=4/5
+2026-03-02T10:09:21.579496+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-02T10:09:21.661197+00:00 mail dovecot: master: Warning: Created dotlock file's timestamp is different than current time (1772446193 vs 1772446161): /var/lib/dovecot/instances
+2026-03-02T10:09:21.941133+00:00 mail opendkim[208]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-02T10:09:22.730459+00:00 mail amavis[251]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-02T10:09:22.730508+00:00 mail amavis[251]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-02T10:09:22.759437+00:00 mail amavis[251]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-02T10:09:22.759471+00:00 mail amavis[251]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-02T10:09:22.763583+00:00 mail amavis[251]: No ext program for   .zoo, tried: zoo
+2026-03-02T10:09:22.763644+00:00 mail amavis[251]: No ext program for   .doc, tried: ripole
+2026-03-02T10:09:22.763763+00:00 mail amavis[251]: No ext program for   .zst, tried: unzstd
+2026-03-02T10:09:22.763790+00:00 mail amavis[251]: No decoder for       .F   
+2026-03-02T10:09:22.763804+00:00 mail amavis[251]: No decoder for       .doc 
+2026-03-02T10:09:22.763807+00:00 mail amavis[251]: No decoder for       .zoo 
+2026-03-02T10:09:22.763809+00:00 mail amavis[251]: No decoder for       .zst 
+2026-03-02T10:09:22.801821+00:00 mail postfix/postfix-script[345]: starting the Postfix mail system
+2026-03-02T10:09:23.294966+00:00 mail postfix/master[346]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-02T10:10:28.322958+00:00 mail postfix/postscreen[399]: CONNECT from [172.32.0.26]:56196 to [172.32.0.25]:25
+2026-03-02T10:10:28.322974+00:00 mail postfix/postscreen[399]: ALLOWLISTED [172.32.0.26]:56196
+2026-03-02T10:10:28.332778+00:00 mail postfix/smtpd[400]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:10:28.410683+00:00 mail postfix/smtpd[400]: 5A4EE20000005D5A55: client=dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:10:28.411536+00:00 mail postfix/cleanup[403]: 5A4EE20000005D5A55: message-id=<20260302101028.000020@de16645a9131>
+2026-03-02T10:10:28.488289+00:00 mail opendkim[208]: mail._domainkey.example.test: key data is not secure: /tmp can be read or written by other users
+2026-03-02T10:10:28.488316+00:00 mail opendkim[208]: 5A4EE20000005D5A55: error loading key 'mail._domainkey.example.test'
+2026-03-02T10:10:28.488474+00:00 mail postfix/cleanup[403]: 5A4EE20000005D5A55: milter-reject: END-OF-MESSAGE from dns_swaks.dns-security-lab_client_net[172.32.0.26]: 4.7.1 Service unavailable - try again later; from=<user@example.test> to=<user@example.test> proto=ESMTP helo=<de16645a9131>
+2026-03-02T10:10:28.510937+00:00 mail postfix/smtpd[400]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] ehlo=1 mail=1 rcpt=1 data=0/1 quit=1 commands=4/5
+2026-03-02T10:12:18.985722+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-02T10:12:19.055268+00:00 mail dovecot: master: Warning: Created dotlock file's timestamp is different than current time (1772446370 vs 1772446339): /var/lib/dovecot/instances
+2026-03-02T10:12:19.325353+00:00 mail opendkim[208]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-02T10:12:20.183106+00:00 mail amavis[253]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-02T10:12:20.183153+00:00 mail amavis[253]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-02T10:12:20.243400+00:00 mail amavis[253]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-02T10:12:20.243425+00:00 mail amavis[253]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-02T10:12:20.248047+00:00 mail amavis[253]: No ext program for   .zoo, tried: zoo
+2026-03-02T10:12:20.248137+00:00 mail amavis[253]: No ext program for   .doc, tried: ripole
+2026-03-02T10:12:20.248296+00:00 mail amavis[253]: No ext program for   .zst, tried: unzstd
+2026-03-02T10:12:20.248325+00:00 mail amavis[253]: No decoder for       .F   
+2026-03-02T10:12:20.248329+00:00 mail amavis[253]: No decoder for       .doc 
+2026-03-02T10:12:20.248335+00:00 mail amavis[253]: No decoder for       .zoo 
+2026-03-02T10:12:20.248337+00:00 mail amavis[253]: No decoder for       .zst 
+2026-03-02T10:12:20.400351+00:00 mail postfix/postfix-script[345]: starting the Postfix mail system
+2026-03-02T10:12:20.886573+00:00 mail postfix/master[346]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-02T10:15:28.010214+00:00 mail postfix/postscreen[640]: CONNECT from [172.32.0.26]:45894 to [172.32.0.25]:25
+2026-03-02T10:15:28.010238+00:00 mail postfix/postscreen[640]: ALLOWLISTED [172.32.0.26]:45894
+2026-03-02T10:15:28.035580+00:00 mail postfix/smtpd[641]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:15:28.118033+00:00 mail postfix/smtpd[641]: 1955440000005D5A57: client=dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:15:28.118810+00:00 mail postfix/cleanup[644]: 1955440000005D5A57: message-id=<20260302101527.000030@de16645a9131>
+2026-03-02T10:15:28.164741+00:00 mail opendkim[208]: 1955440000005D5A57: DKIM-Signature field added (s=mail, d=example.test)
+2026-03-02T10:15:28.320343+00:00 mail postfix/cleanup[644]: 47C3E50000005D5A57: message-id=<20260302101528.47C3E50000005D5A57@mail.example.test>
+2026-03-02T10:15:28.353046+00:00 mail postfix/smtpd[641]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] ehlo=1 mail=1 rcpt=1 data=0/1 quit=1 commands=4/5
+2026-03-02T10:20:47.804179+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-02T10:20:48.130909+00:00 mail opendkim[643]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-02T10:20:48.532677+00:00 mail postfix/postfix-script[741]: starting the Postfix mail system
+2026-03-02T10:20:48.537555+00:00 mail postfix/master[742]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-02T10:20:48.909446+00:00 mail amavis[698]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-02T10:20:48.909504+00:00 mail amavis[698]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-02T10:20:48.925045+00:00 mail amavis[698]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-02T10:20:48.925105+00:00 mail amavis[698]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-02T10:20:48.929870+00:00 mail amavis[698]: No ext program for   .zoo, tried: zoo
+2026-03-02T10:20:48.929944+00:00 mail amavis[698]: No ext program for   .doc, tried: ripole
+2026-03-02T10:20:48.930246+00:00 mail amavis[698]: No ext program for   .zst, tried: unzstd
+2026-03-02T10:20:48.930281+00:00 mail amavis[698]: No decoder for       .F   
+2026-03-02T10:20:48.930298+00:00 mail amavis[698]: No decoder for       .doc 
+2026-03-02T10:20:48.930301+00:00 mail amavis[698]: No decoder for       .zoo 
+2026-03-02T10:20:48.930316+00:00 mail amavis[698]: No decoder for       .zst 
+2026-03-02T10:23:42.408551+00:00 mail postfix/postscreen[1042]: cache btree:/var/lib/postfix/postscreen_cache full cleanup: retained=0 dropped=0 entries
+2026-03-02T10:23:42.409139+00:00 mail postfix/postscreen[1042]: CONNECT from [172.32.0.26]:40634 to [172.32.0.25]:25
+2026-03-02T10:23:42.409162+00:00 mail postfix/postscreen[1042]: ALLOWLISTED [172.32.0.26]:40634
+2026-03-02T10:23:42.417179+00:00 mail postfix/smtpd[1043]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:23:42.426523+00:00 mail postfix/smtpd[1043]: 6818D1BC765: client=dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:23:42.427266+00:00 mail postfix/cleanup[1046]: 6818D1BC765: message-id=<20260302102342.000020@33517ed35c2c>
+2026-03-02T10:23:42.472810+00:00 mail opendkim[643]: 6818D1BC765: DKIM-Signature field added (s=mail, d=example.test)
+2026-03-02T10:23:42.515516+00:00 mail postfix/qmgr[744]: 6818D1BC765: from=<user@example.test>, size=490, nrcpt=1 (queue active)
+2026-03-02T10:23:42.515892+00:00 mail postfix/smtpd[1043]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] ehlo=1 mail=1 rcpt=1 data=1 quit=1 commands=5
+2026-03-02T10:23:42.569673+00:00 mail postfix/smtp-amavis/smtp[1047]: 6818D1BC765: prepend: header Message-Id: <20260302102342.000020@33517ed35c2c>: X-MS-Reactions: disallow
+2026-03-02T10:23:42.630744+00:00 mail postfix/smtpd-amavis/smtpd[1049]: connect from localhost[127.0.0.1]
+2026-03-02T10:23:42.634464+00:00 mail postfix/smtpd-amavis/smtpd[1049]: 9ADD91BC770: client=localhost[127.0.0.1]
+2026-03-02T10:23:42.635966+00:00 mail postfix/cleanup[1046]: 9ADD91BC770: message-id=<20260302102342.000020@33517ed35c2c>
+2026-03-02T10:23:42.639395+00:00 mail postfix/qmgr[744]: 9ADD91BC770: from=<user@example.test>, size=1165, nrcpt=1 (queue active)
+2026-03-02T10:23:42.647943+00:00 mail amavis[793]: (00793-01) Passed CLEAN {RelayedInbound}, [172.32.0.26]:40634 [172.32.0.26] <user@example.test> -> <user@example.test>, Queue-ID: 6818D1BC765, Message-ID: <20260302102342.000020@33517ed35c2c>, mail_id: iF6VDBKdmcHR, Hits: -, size: 957, queued_as: 9ADD91BC770, 126 ms
+2026-03-02T10:23:42.649847+00:00 mail postfix/smtp-amavis/smtp[1047]: 6818D1BC765: to=<user@example.test>, relay=127.0.0.1[127.0.0.1]:10024, delay=0.23, delays=0.09/0.01/0/0.13, dsn=2.0.0, status=sent (250 2.0.0 from MTA(smtp:[127.0.0.1]:10025): 250 2.0.0 Ok: queued as 9ADD91BC770)
+2026-03-02T10:23:42.650586+00:00 mail postfix/qmgr[744]: 6818D1BC765: removed
+2026-03-02T10:23:42.661623+00:00 mail dovecot: lmtp(1051): Connect from local
+2026-03-02T10:23:42.944003+00:00 mail dovecot: lmtp(user@example.test)<1051><3pdsJy5lpWkbBAAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772447054 vs 1772447022): /var/mail/example.test/user/dovecot.index.log
+2026-03-02T10:24:15.123104+00:00 mail dovecot: lmtp(user@example.test)<1051><3pdsJy5lpWkbBAAAUi6ngw>: Error: sieve: msgid=<20260302102342.000020@33517ed35c2c>: failed to store into mailbox 'INBOX': Mailbox was deleted under us
+2026-03-02T10:24:15.123130+00:00 mail dovecot: lmtp(user@example.test)<1051><3pdsJy5lpWkbBAAAUi6ngw>: Error: sieve: Execution of script /usr/lib/dovecot/sieve-global/after/spam_to_junk.sieve failed with unsuccessful implicit keep
+2026-03-02T10:24:15.136104+00:00 mail dovecot: lmtp(1051): Disconnect from local: Logged out (state=READY)
+2026-03-02T10:24:15.142744+00:00 mail postfix/lmtp[1050]: 9ADD91BC770: to=<user@example.test>, relay=mail.example.test[/var/run/dovecot/lmtp], delay=33, delays=0.01/0.01/0.01/32, dsn=4.2.0, status=deferred (host mail.example.test[/var/run/dovecot/lmtp] said: 451 4.2.0 <user@example.test> Mailbox was deleted under us (in reply to end of DATA command))
+2026-03-02T10:23:43.665943+00:00 mail dovecot: master: Warning: Time moved backwards by 31.470605 seconds, waiting for 31.470 seconds until new services are launched again.
+2026-03-02T10:28:41.122010+00:00 mail postfix/smtpd-amavis/smtpd[1049]: timeout after END-OF-MESSAGE from localhost[127.0.0.1]
+2026-03-02T10:28:41.122034+00:00 mail postfix/smtpd-amavis/smtpd[1049]: disconnect from localhost[127.0.0.1] ehlo=1 mail=1 rcpt=1 data=1 commands=4
+2026-03-02T10:30:48.760531+00:00 mail postfix/qmgr[744]: 9ADD91BC770: from=<user@example.test>, size=1165, nrcpt=1 (queue active)
+2026-03-02T10:30:48.782420+00:00 mail dovecot: lmtp(1705): Connect from local
+2026-03-02T10:30:49.726781+00:00 mail dovecot: lmtp(user@example.test)<1705><plGcLthmpWmpBgAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772447481 vs 1772447449): /var/mail/example.test/user/dovecot-uidlist
+2026-03-02T10:30:49.886298+00:00 mail dovecot: lmtp(user@example.test)<1705><plGcLthmpWmpBgAAUi6ngw>: Error: lmtp-server: conn unix:pid=1704,uid=105 [1]: rcpt user@example.test: Mailbox INBOX: fstat(/var/mail/example.test/user/dovecot-uidlist.tmp) failed: No such file or directory
+2026-03-02T10:30:49.959855+00:00 mail dovecot: lmtp(user@example.test)<1705><plGcLthmpWmpBgAAUi6ngw>: Error: lmtp-server: conn unix:pid=1704,uid=105 [1]: rcpt user@example.test: Mailbox INBOX: fstat(/var/mail/example.test/user/dovecot-uidlist.tmp) failed: No such file or directory
+2026-03-02T10:30:49.965977+00:00 mail dovecot: lmtp(user@example.test)<1705><plGcLthmpWmpBgAAUi6ngw>: Panic: file maildir-save.c: line 757 (maildir_save_sync_index): assertion failed: (first_uid != 0)
+2026-03-02T10:30:49.969740+00:00 mail dovecot: lmtp(user@example.test)<1705><plGcLthmpWmpBgAAUi6ngw>: Error: Raw backtrace: #0 t_askpass[0x71adaac71be0] -> #1 backtrace_append[0x71adaac71e50] -> #2 backtrace_get[0x71adaac71fe0] -> #3 execvp_const[0x71adaac7d1d0] -> #4 i_syslog_fatal_handler[0x71adaac7db40] -> #5 i_panic[0x71adaabd30d4] -> #6 [unw_get_proc_name() failed: -10] -> #7 index_thread_mailbox_opened[0x71adaae2fd50] -> #8 mail_index_transaction_commit_full[0x71adaae4a8e0] -> #9 index_transaction_commit[0x71adaae302e0] -> #10 [unw_get_proc_name() failed: -10] -> #11 mailbox_list_index_status_sync_deinit[0x71adaae0b330] -> #12 quota_transaction_commit[0x71adaa3e4e60] -> #13 mailbox_transaction_commit_get_changes[0x71adaadad660] -> #14 mailbox_transaction_commit[0x71adaadad7a0] -> #15 sieve_act_redirect_add_to_result[0x71adaa1a2900] -> #16 sieve_code_mark_specific[0x71adaa1977f0] -> #17 sieve_result_execute[0x71adaa19a490] -> #18 sieve_multiscript_finish[0x71adaa1aac90] -> #19 [unw_get_proc_name() failed: -10] -> #20 mail_deliver[0x71adaaebf740] -> #21 lmtp_local_default_deliver[0x5d7a476730e0] -> #22 lmtp_local_data[0x5d7a476746f0] -> #23 client_default_cmd_data[0x5d7a47676630] -> #24 cmd_data_continue[0x5d7a47672970] -> #25 pwrite_full[0x71adaacbd420] -> #26 io_loop_call_io[0x71adaac94eb0] -> #27 io_loop_handler_run_internal[0x71adaac96bb0] -> #28 io_loop_handler_run[0x71adaac96d40] -> #29 io_loop_run[0x71adaac96f10] -> #30 master_service_run[0x71adaac071c0] -> #31 main[0x5d7a47672010] -> #32 __libc_init_first[0x71adaa9c01d0] -> #33 __libc_start_main[0x71adaa9c0280] -> #34 _start[0x5d7a47672370]
+2026-03-02T10:30:49.981804+00:00 mail dovecot: lmtp(user@example.test)<1705><plGcLthmpWmpBgAAUi6ngw>: Fatal: master: service(lmtp): child 1705 killed with signal 6 (core dumps disabled - https://dovecot.org/bugreport.html#coredumps)
+2026-03-02T10:30:49.991205+00:00 mail postfix/lmtp[1704]: 9ADD91BC770: to=<user@example.test>, relay=mail.example.test[/var/run/dovecot/lmtp], delay=427, delays=426/0.01/0.01/1.2, dsn=4.4.2, status=deferred (lost connection with mail.example.test[/var/run/dovecot/lmtp] while sending end of data -- message may be sent more than once)
+2026-03-02T10:33:43.325371+00:00 mail postfix/postscreen[1983]: CONNECT from [172.32.0.26]:53734 to [172.32.0.25]:25
+2026-03-02T10:33:43.325395+00:00 mail postfix/postscreen[1983]: ALLOWLISTED [172.32.0.26]:53734
+2026-03-02T10:33:43.338887+00:00 mail postfix/smtpd[1986]: connect from dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:33:43.353536+00:00 mail postfix/smtpd[1986]: 564581BC4A6: client=dns_swaks.dns-security-lab_client_net[172.32.0.26]
+2026-03-02T10:33:43.354583+00:00 mail postfix/cleanup[1989]: 564581BC4A6: message-id=<20260302103343.000020@bde607abbc47>
+2026-03-02T10:33:43.400178+00:00 mail opendkim[643]: 564581BC4A6: DKIM-Signature field added (s=mail, d=example.test)
+2026-03-02T10:33:43.443411+00:00 mail postfix/qmgr[744]: 564581BC4A6: from=<user@example.test>, size=490, nrcpt=1 (queue active)
+2026-03-02T10:33:43.443941+00:00 mail postfix/smtpd[1986]: disconnect from dns_swaks.dns-security-lab_client_net[172.32.0.26] ehlo=1 mail=1 rcpt=1 data=1 quit=1 commands=5
+2026-03-02T10:33:43.501103+00:00 mail postfix/smtp-amavis/smtp[1990]: 564581BC4A6: prepend: header Message-Id: <20260302103343.000020@bde607abbc47>: X-MS-Reactions: disallow
+2026-03-02T10:33:43.574900+00:00 mail postfix/smtpd-amavis/smtpd[1992]: connect from localhost[127.0.0.1]
+2026-03-02T10:33:43.578054+00:00 mail postfix/smtpd-amavis/smtpd[1992]: 8D1731BC4B1: client=localhost[127.0.0.1]
+2026-03-02T10:33:43.580043+00:00 mail postfix/cleanup[1989]: 8D1731BC4B1: message-id=<20260302103343.000020@bde607abbc47>
+2026-03-02T10:33:43.583711+00:00 mail postfix/qmgr[744]: 8D1731BC4B1: from=<user@example.test>, size=1165, nrcpt=1 (queue active)
+2026-03-02T10:33:43.589508+00:00 mail amavis[794]: (00794-01) Passed CLEAN {RelayedInbound}, [172.32.0.26]:53734 [172.32.0.26] <user@example.test> -> <user@example.test>, Queue-ID: 564581BC4A6, Message-ID: <20260302103343.000020@bde607abbc47>, mail_id: fVmb7CYbq5q6, Hits: -, size: 957, queued_as: 8D1731BC4B1, 136 ms
+2026-03-02T10:33:43.591614+00:00 mail postfix/smtp-amavis/smtp[1990]: 564581BC4A6: to=<user@example.test>, relay=127.0.0.1[127.0.0.1]:10024, delay=0.25, delays=0.1/0.01/0.01/0.13, dsn=2.0.0, status=sent (250 2.0.0 from MTA(smtp:[127.0.0.1]:10025): 250 2.0.0 Ok: queued as 8D1731BC4B1)
+2026-03-02T10:33:43.592096+00:00 mail postfix/qmgr[744]: 564581BC4A6: removed
+2026-03-02T10:33:43.604981+00:00 mail dovecot: lmtp(1994): Connect from local
+2026-03-02T10:33:44.632995+00:00 mail dovecot: lmtp(user@example.test)<1994><6swJJIdnpWnKBwAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772447656 vs 1772447624): /var/mail/example.test/user/dovecot-uidlist
+2026-03-02T10:34:16.769245+00:00 mail dovecot: lmtp(user@example.test)<1994><6swJJIdnpWnKBwAAUi6ngw>: Warning: Maildir /var/mail/example.test/user: Synchronization took 32 seconds (0 new msgs, 0 flag change attempts, 0 expunge attempts)
+2026-03-02T10:33:45.147372+00:00 mail dovecot: log(610): Warning: Time moved backwards by 31.621969 seconds.
+2026-03-02T10:33:45.147499+00:00 mail dovecot: lmtp(user@example.test)<1994><6swJJIdnpWnKBwAAUi6ngw>: sieve: msgid=<20260302103343.000020@bde607abbc47>: stored mail into mailbox 'INBOX'
+2026-03-02T10:33:45.185581+00:00 mail postfix/lmtp[1993]: 8D1731BC4B1: to=<user@example.test>, relay=mail.example.test[/var/run/dovecot/lmtp], delay=1.6, delays=0.01/0.01/0.01/1.6, dsn=2.0.0, status=sent (250 2.0.0 <user@example.test> 6swJJIdnpWnKBwAAUi6ngw Saved)
+2026-03-02T10:33:45.185674+00:00 mail dovecot: lmtp(1994): Disconnect from local: Logged out (state=READY)
+2026-03-02T10:33:45.185833+00:00 mail postfix/qmgr[744]: 8D1731BC4B1: removed
+2026-03-02T10:38:42.079628+00:00 mail postfix/smtpd-amavis/smtpd[1992]: timeout after END-OF-MESSAGE from localhost[127.0.0.1]
+2026-03-02T10:38:42.079692+00:00 mail postfix/smtpd-amavis/smtpd[1992]: disconnect from localhost[127.0.0.1] ehlo=1 mail=1 rcpt=1 data=1 commands=4
+2026-03-02T10:40:48.025356+00:00 mail postfix/qmgr[744]: 9ADD91BC770: from=<user@example.test>, size=1165, nrcpt=1 (queue active)
+2026-03-02T10:40:48.054694+00:00 mail dovecot: lmtp(2618): Connect from local
+2026-03-02T10:40:48.731404+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772448080 vs 1772448048): /var/mail/example.test/user/dovecot-uidlist
+2026-03-02T10:40:49.317156+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Error: lmtp-server: conn unix:pid=2617,uid=105 [1]: rcpt user@example.test: Mailbox INBOX: mmap(size=0) failed with file /var/mail/example.test/user/dovecot.index.cache: No such file or directory
+2026-03-02T10:40:49.526718+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772448081 vs 1772448049): /var/mail/example.test/user/dovecot-uidlist
+2026-03-02T10:40:49.625605+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Error: lmtp-server: conn unix:pid=2617,uid=105 [1]: rcpt user@example.test: Mailbox INBOX: fstat(/var/mail/example.test/user/dovecot-uidlist.tmp) failed: No such file or directory
+2026-03-02T10:40:49.851897+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772448081 vs 1772448049): /var/mail/example.test/user/dovecot-uidlist
+2026-03-02T10:40:50.391919+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: sieve: msgid=<20260302102342.000020@33517ed35c2c>: stored mail into mailbox 'INBOX'
+2026-03-02T10:40:50.450657+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Warning: Created dotlock file's timestamp is different than current time (1772448082 vs 1772448050): /var/mail/example.test/user/dovecot-uidlist
+2026-03-02T10:40:50.644553+00:00 mail dovecot: lmtp(user@example.test)<2618><SUc+AzBppWk6CgAAUi6ngw>: Error: lmtp-server: conn unix:pid=2617,uid=105 [1]: rcpt user@example.test: Mailbox INBOX: fstat(/var/mail/example.test/user/dovecot-uidlist.tmp) failed: No such file or directory
+2026-03-02T10:40:50.665113+00:00 mail postfix/lmtp[2617]: 9ADD91BC770: to=<user@example.test>, relay=mail.example.test[/var/run/dovecot/lmtp], delay=1028, delays=1025/0.02/0.01/2.6, dsn=2.0.0, status=sent (250 2.0.0 <user@example.test> SUc+AzBppWk6CgAAUi6ngw Saved)
+2026-03-02T10:40:50.665205+00:00 mail dovecot: lmtp(2618): Disconnect from local: Logged out (state=READY)
+2026-03-02T10:40:50.665523+00:00 mail postfix/qmgr[744]: 9ADD91BC770: removed

@@ -264,3 +264,76 @@ flags: qr rd ra
 - Run with `docker compose up -d --build`.
 
 
+Co dalej (testy)
+
+Przepisz strefę na podpisaną (BIND używa db.example.test.signed):
+docker compose run --rm signer
+Uruchom mailserver:
+docker compose up -d mailserver
+Uruchom swaks (test sender):
+docker compose up -d --build swaks
+Dodaj konto (DMS preferuje setup email add, a bez konta startuje i po chwili restartuje):
+docker compose exec mailserver setup email add user@example.test
+(docker-mailserver.github.io)
+(Opcjonalnie) Jeśli chcesz wygenerować nowe klucze DKIM z poziomu DMS, użyj:
+docker compose exec mailserver setup config dkim
+Klucze wylądują w /tmp/docker-mailserver/opendkim/. (docker-mailserver.github.io)
+
+UI (React) — Email:
+- Otwórz http://localhost:5173 → zakładka Email.
+- Ustaw From/To (np. user@example.test), Server=mail.example.test, Port=25.
+- Kliknij “Send Email”, potem “Load DKIM Logs” żeby zobaczyć wynik w logach.
+Oczekiwane:
+- SMTP: `250 2.0.0 Ok: queued as ...`
+- DKIM: `DKIM-Signature field added (s=mail, d=example.test)`
+Opcjonalnie sprawdz IMAP (czy wiadomosc dotarla do skrzynki):
+openssl s_client -connect 127.0.0.1:1993 -crlf
+Nastepnie:
+a login user@example.test <password>
+a select INBOX
+a fetch 1:* (FLAGS BODY.PEEK[HEADER.FIELDS (SUBJECT FROM TO DATE)])
+a logout
+
+
+2) Test commands (minimal flow)
+
+Re‑sign zone (so db.example.test.signed contains MX/SPF/DKIM):
+
+docker compose run --rm signer
+Restart authoritative child so it reloads the signed zone:
+
+docker compose restart authoritative_child
+Start mailserver:
+
+docker compose up -d mailserver
+Start swaks (test sender):
+
+docker compose up -d --build swaks
+Create a test mailbox:
+
+docker compose exec mailserver setup email add user@example.test
+Send a test mail (if swaks is available on your host):
+
+swaks --to user@example.test --from user@example.test --server 127.0.0.1 --port 2525 --data "Subject: test\r\n\r\nhello"
+Check DKIM results in logs:
+
+docker compose exec mailserver tail -n 200 /var/log/mail/
+
+Note (Windows):
+- Używamy named volume `mailserver_state` dla `/var/mail-state` (Postfix queue),
+  bo bind mount na NTFS potrafi powodować `queue file write error`.
+
+
+===
+
+Send a test mail from inside the swaks container
+
+docker compose exec swaks swaks \
+  --to user@example.test \
+  --from user@example.test \
+  --server mail.example.test \
+  --port 25 \
+  --header "Subject: test" \
+  --body "hello"
+
+docker compose exec mailserver setup email add user@example.test

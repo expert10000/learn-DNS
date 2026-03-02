@@ -11,6 +11,7 @@ import struct
 import time
 import threading
 import base64
+import shlex
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
@@ -242,6 +243,8 @@ CLIENT_UNTRUSTED_CONTAINER = os.getenv("CLIENT_UNTRUSTED_CONTAINER", "dns_untrus
 CLIENT_MGMT_CONTAINER = os.getenv("CLIENT_MGMT_CONTAINER", "dns_mgmt_client")
 TOOLBOX_CONTAINER = os.getenv("TOOLBOX_CONTAINER", "dns_toolbox")
 PERF_TOOLS_CONTAINER = os.getenv("PERF_TOOLS_CONTAINER", "dns_perf_tools")
+MAILSERVER_CONTAINER = os.getenv("MAILSERVER_CONTAINER", "dns_mailserver")
+SWAKS_CONTAINER = os.getenv("SWAKS_CONTAINER", "dns_swaks")
 
 CLIENT_CONTAINER_BY_PROFILE = {
     "trusted": CLIENT_TRUSTED_CONTAINER,
@@ -272,6 +275,14 @@ MAX_RESPERF_QUERIES = 2000
 DEFAULT_PERF_QUERY_FILE = "/work/tests/perf/queries.txt"
 MAX_PERF_QUERY_LINES = 1000
 MAX_PERF_QUERY_CHARS = 20000
+MAX_EMAIL_BODY_CHARS = 10000
+MAX_EMAIL_SUBJECT_CHARS = 200
+MAX_MAIL_LOG_LINES = 1000
+MAX_MAIL_LOG_GREP_CHARS = 120
+MAX_IMAP_LINES = 500
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+MAILBOX_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 class DigRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
@@ -435,6 +446,34 @@ class PrivacyCheckResponse(BaseModel):
     response_bytes: int = 0
     elapsed_ms: int = 0
     detail: Optional[str] = None
+
+class EmailSendRequest(BaseModel):
+    to_addr: str = Field(..., alias="to")
+    from_addr: str = Field(..., alias="from")
+    subject: str = "DNS lab test"
+    body: str = "Hello from the DNS lab."
+    server: str = "mail.example.test"
+    port: int = 25
+    tls_mode: Literal["none", "starttls", "tls"] = "none"
+    auth_user: Optional[str] = None
+    auth_password: Optional[str] = None
+    auth_type: Literal["AUTO", "LOGIN", "PLAIN", "CRAM-MD5"] = "AUTO"
+
+    class Config:
+        allow_population_by_field_name = True
+
+class EmailLogResponse(BaseModel):
+    ok: bool
+    file: str
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
+class EmailImapCheckRequest(BaseModel):
+    user: str
+    mailbox: str = "INBOX"
+    limit: int = 40
 
 class AmplificationTestRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
@@ -765,6 +804,43 @@ def validate_name(name: str) -> str:
     if not NAME_RE.match(name):
         raise HTTPException(status_code=400, detail="Invalid DNS name format")
     return name
+
+def validate_email(addr: str) -> str:
+    addr = addr.strip()
+    if not EMAIL_RE.match(addr):
+        raise HTTPException(status_code=400, detail="Invalid email format")
+    local, domain = addr.rsplit("@", 1)
+    if len(local) > 64 or len(domain) > 253:
+        raise HTTPException(status_code=400, detail="Invalid email length")
+    if not NAME_RE.match(domain):
+        raise HTTPException(status_code=400, detail="Invalid email domain")
+    return addr
+
+def validate_host(host: str) -> str:
+    host = host.strip()
+    if not host:
+        raise HTTPException(status_code=400, detail="Invalid host")
+    if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):
+        return host
+    if not NAME_RE.match(host):
+        raise HTTPException(status_code=400, detail="Invalid host")
+    return host
+
+def validate_port(port: int) -> int:
+    if port < 1 or port > 65535:
+        raise HTTPException(status_code=400, detail="Invalid port")
+    return port
+
+def validate_mailbox(name: str) -> str:
+    name = name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Invalid mailbox")
+    if not MAILBOX_RE.match(name):
+        raise HTTPException(status_code=400, detail="Invalid mailbox name")
+    return name
+
+def redact_auth_password(cmd: str) -> str:
+    return re.sub(r"(--auth-password\s+)(\S+)", r"\1****", cmd)
 
 def run_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
     try:
@@ -1464,6 +1540,91 @@ def _resolver_mem_stats(container: str) -> tuple[Optional[int], Optional[int]]:
 def ensure_capture_dir():
     if not CAPTURE_DIR.exists():
         raise HTTPException(status_code=500, detail="Capture directory not mounted")
+
+def _mail_log_file() -> str:
+    res = docker_exec_root(
+        MAILSERVER_CONTAINER,
+        "ls -1t /var/log/mail/* 2>/dev/null | head -n 1",
+        timeout_s=6,
+    )
+    if res.exit_code != 0 or not res.stdout.strip():
+        raise HTTPException(status_code=404, detail="Mail log not found")
+    return res.stdout.strip()
+
+def _build_swaks_command(req: EmailSendRequest) -> tuple[str, str]:
+    subject = (req.subject or "").strip()
+    if len(subject) > MAX_EMAIL_SUBJECT_CHARS:
+        subject = subject[:MAX_EMAIL_SUBJECT_CHARS]
+    body = req.body or ""
+    if len(body) > MAX_EMAIL_BODY_CHARS:
+        raise HTTPException(status_code=400, detail="Email body too large")
+
+    parts = [
+        "swaks",
+        "--to",
+        req.to_addr,
+        "--from",
+        req.from_addr,
+        "--server",
+        req.server,
+        "--port",
+        str(req.port),
+        "--header",
+        f"Subject: {subject}",
+        "--body",
+        body,
+    ]
+
+    if req.tls_mode == "starttls":
+        parts.append("--tls")
+    elif req.tls_mode == "tls":
+        parts.append("--tls-on-connect")
+
+    if req.auth_user or req.auth_password:
+        if not req.auth_user or not req.auth_password:
+            raise HTTPException(status_code=400, detail="Auth user/password required")
+        parts.extend(
+            [
+                "--auth",
+                req.auth_type,
+                "--auth-user",
+                req.auth_user,
+                "--auth-password",
+                req.auth_password,
+            ]
+        )
+
+    cmd = " ".join(shlex.quote(p) for p in parts)
+    return cmd, redact_auth_password(cmd)
+
+def _maildir_headers(user: str, limit: int) -> CmdResponse:
+    if "@" not in user:
+        raise HTTPException(status_code=400, detail="Invalid mailbox user")
+    local, domain = user.split("@", 1)
+    local = local.strip()
+    domain = domain.strip()
+    if not local or not domain:
+        raise HTTPException(status_code=400, detail="Invalid mailbox user")
+    if not NAME_RE.match(domain):
+        raise HTTPException(status_code=400, detail="Invalid mailbox domain")
+    # local-part validation is relaxed, but restrict to safe set for paths
+    if not MAILBOX_RE.match(local):
+        raise HTTPException(status_code=400, detail="Invalid mailbox user")
+
+    base = f"/var/mail/{domain}/{local}"
+    cmd = (
+        "sh -lc '"
+        "dir={base}; "
+        "files=$(ls -t \"$dir\"/new/* \"$dir\"/cur/* 2>/dev/null | head -n {limit}); "
+        "if [ -z \"$files\" ]; then echo \"No messages found.\"; exit 0; fi; "
+        "for f in $files; do "
+        "echo \"FILE: $f\"; "
+        "sed -n \"1,80p\" \"$f\" | sed -n \"/^$/q; p\" | "
+        "grep -Ei \"^(From|To|Subject|Date|Message-Id):\"; "
+        "echo \"\"; "
+        "done'"
+    ).format(base=base, limit=limit)
+    return docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
 
 @app.get("/health")
 def health():
@@ -2872,6 +3033,122 @@ def privacy_doh_check(
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+@app.post("/email/send", response_model=CmdResponse)
+def email_send(
+    req: EmailSendRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    req.to_addr = validate_email(req.to_addr)
+    req.from_addr = validate_email(req.from_addr)
+    req.server = validate_host(req.server)
+    req.port = validate_port(req.port)
+
+    ensure_running(SWAKS_CONTAINER)
+    ensure_running(MAILSERVER_CONTAINER)
+
+    swaks_cmd, swaks_cmd_redacted = _build_swaks_command(req)
+    res = docker_exec(SWAKS_CONTAINER, swaks_cmd, timeout_s=20)
+    if request:
+        audit_log(
+            request,
+            "email_send",
+            {
+                "ok": res.ok,
+                "to": req.to_addr,
+                "from": req.from_addr,
+                "server": req.server,
+                "port": req.port,
+                "tls": req.tls_mode,
+            },
+        )
+    return CmdResponse(
+        ok=res.ok,
+        command=f"docker exec {SWAKS_CONTAINER} sh -lc {swaks_cmd_redacted}",
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.get("/email/logs", response_model=EmailLogResponse)
+def email_logs(
+    tail: int = 200,
+    grep: Optional[str] = None,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    tail = max(1, min(tail, MAX_MAIL_LOG_LINES))
+    if grep:
+        grep = grep.strip()
+        if len(grep) > MAX_MAIL_LOG_GREP_CHARS:
+            raise HTTPException(status_code=400, detail="Grep filter too long")
+
+    ensure_running(MAILSERVER_CONTAINER)
+    log_file = _mail_log_file()
+    base_cmd = f"tail -n {tail} {shlex.quote(log_file)}"
+    cmd = base_cmd
+    if grep:
+        cmd = f"{base_cmd} | grep -iF -- {shlex.quote(grep)}"
+
+    res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+    if request:
+        audit_log(request, "email_logs", {"ok": res.ok, "grep": grep or ""})
+    return EmailLogResponse(
+        ok=res.ok,
+        file=log_file,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.post("/email/imap-check", response_model=CmdResponse)
+def email_imap_check(
+    req: EmailImapCheckRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    user = validate_email(req.user)
+    mailbox = validate_mailbox(req.mailbox)
+    limit = max(1, min(req.limit, MAX_IMAP_LINES))
+
+    ensure_running(MAILSERVER_CONTAINER)
+    fields = "hdr.subject hdr.from hdr.to hdr.date"
+    cmd = (
+        "doveadm fetch -u {user} '{fields}' mailbox {mailbox} all | tail -n {limit}"
+    ).format(
+        user=shlex.quote(user),
+        fields=fields,
+        mailbox=shlex.quote(mailbox),
+        limit=limit,
+    )
+    res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+    if not res.ok:
+        # Fallback for missing dovecot index files or empty mailbox metadata.
+        res = _maildir_headers(user, limit)
+    if request:
+        audit_log(
+            request,
+            "email_imap_check",
+            {"ok": res.ok, "user": user, "mailbox": mailbox, "limit": limit},
+        )
+    return CmdResponse(
+        ok=res.ok,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
 
 @app.get("/capture/summary", response_model=CaptureSummaryResponse)
 def capture_summary(

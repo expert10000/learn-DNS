@@ -586,6 +586,27 @@ button:not(:disabled):hover {
   color: #fff;
 }
 
+.email-panels {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  margin-top: 16px;
+}
+
+.email-panel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: var(--surface-alt);
+  box-shadow: var(--shadow-soft);
+}
+
+.email-log-meta {
+  font-size: 0.8rem;
+  opacity: 0.7;
+  margin-bottom: 8px;
+}
+
 .section-title {
   font-weight: 600;
   margin: 16px 0 10px;
