@@ -620,7 +620,7 @@ services:
       com.dns.role: "dns_lab_api"
     environment:
       - LAB_API_KEY=change_me_long_random
-      - LAB_API_ALLOW_DOCKER=1
+      - LAB_API_ALLOW_DOCKER=0
       - LAB_API_RATE_LIMIT_PER_MIN=120
       - LAB_API_RATE_LIMIT_WINDOW_S=60
       - LAB_API_AUDIT_LOG=/var/log/lab_api/audit.log
@@ -659,7 +659,6 @@ services:
       start_period: 20s
     # Optional: allow API to show logs via HTTP (read-only)
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
       - ./bind9/log:/logs/bind:ro
       - ./unbound/log:/logs/unbound:ro
       - ./bind9:/config/bind:rw
@@ -680,6 +679,7 @@ services:
       com.dns.role: "agent_authoritative"
     environment:
       - AGENT_ROLE=authoritative
+      - AGENT_NODE_IP=172.30.0.91
       - AGENT_API_KEY=change_me_agent
       - AGENT_LOG_DIRS=bind=/logs/bind,bind_parent=/logs/bind_parent
       - AGENT_CONFIG_ROOTS=bind=/config/bind,bind_parent=/config/bind_parent
@@ -714,6 +714,7 @@ services:
       com.dns.role: "agent_resolver"
     environment:
       - AGENT_ROLE=resolver
+      - AGENT_NODE_IP=172.30.0.92
       - AGENT_API_KEY=change_me_agent
       - AGENT_LOG_DIRS=unbound=/logs/unbound,unbound_plain=/logs/unbound_plain
       - AGENT_CONFIG_ROOTS=unbound=/config/unbound

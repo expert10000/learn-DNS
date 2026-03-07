@@ -88,6 +88,43 @@ def _agent_for_config(path: str) -> Optional[str]:
         return AUTH_AGENT_URL
     return None
 
+def _collect_nodes() -> tuple[list["NodeInfo"], dict[str, str]]:
+    nodes: list[NodeInfo] = []
+    errors: dict[str, str] = {}
+    for label, url in (("authoritative", AUTH_AGENT_URL), ("resolver", RESOLVER_AGENT_URL)):
+        if not url:
+            errors[label] = "Agent URL not configured"
+            continue
+        try:
+            data = _agent_request(url, "/status")
+        except HTTPException as exc:
+            errors[label] = str(exc.detail)
+            continue
+        agent_meta = data.get("agent") or {}
+        agent_role = data.get("role") or label
+        agent_version = agent_meta.get("version")
+        agent_hostname = agent_meta.get("hostname")
+        for check in data.get("checks", []) or []:
+            try:
+                port = int(check.get("port", 0))
+            except (TypeError, ValueError):
+                port = 0
+            name = str(check.get("name", "")) or agent_role
+            nodes.append(
+                NodeInfo(
+                    name=name,
+                    role=name,
+                    ip=str(check.get("host", "")),
+                    port=port,
+                    ok=bool(check.get("ok", False)),
+                    latency_ms=check.get("latency_ms"),
+                    agent_role=agent_role,
+                    agent_version=agent_version,
+                    agent_hostname=agent_hostname,
+                )
+            )
+    return nodes, errors
+
 def _tail_file(path: Path, lines: int) -> str:
     if lines <= 0:
         return ""
@@ -336,6 +373,22 @@ class ConfigFileResponse(BaseModel):
 class AgentAggregateResponse(BaseModel):
     ok: bool
     agents: dict
+
+class NodeInfo(BaseModel):
+    name: str
+    role: str
+    ip: str
+    port: int
+    ok: bool
+    latency_ms: Optional[float] = None
+    agent_role: str
+    agent_version: Optional[str] = None
+    agent_hostname: Optional[str] = None
+
+class NodesResponse(BaseModel):
+    ok: bool
+    nodes: list[NodeInfo]
+    errors: dict[str, str] = {}
 
 class StartupDiagnosticsResponse(BaseModel):
     ok: bool
@@ -3032,6 +3085,12 @@ def agent_stats(x_api_key: Optional[str] = Header(default=None)):
     if RESOLVER_AGENT_URL:
         agents["resolver"] = _agent_request(RESOLVER_AGENT_URL, "/stats")
     return AgentAggregateResponse(ok=True, agents=agents)
+
+@app.get("/nodes", response_model=NodesResponse)
+def nodes(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    nodes_list, errors = _collect_nodes()
+    return NodesResponse(ok=len(errors) == 0, nodes=nodes_list, errors=errors)
 
 @app.post("/capture/start", response_model=CaptureStartResponse)
 def capture_start(

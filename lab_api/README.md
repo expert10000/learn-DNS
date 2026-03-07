@@ -28,6 +28,8 @@ ssh -L 8000:127.0.0.1:8000 gns3@<VM_IP>
 
 ```bash
 curl -s http://localhost:8000/health
+curl -s http://localhost:8000/nodes \
+  -H "X-API-Key: change_me_long_random"
 curl -s http://localhost:8000/dig \
   -H "Content-Type: application/json" \
   -H "X-API-Key: change_me_long_random" \
@@ -60,4 +62,5 @@ curl -s http://localhost:8000/email/imap-check \
 
 - Do **not** add any endpoint that runs arbitrary shell strings.
 - Keep this service bound to VM localhost and reach it via SSH tunnel.
-- Email endpoints require `LAB_API_ALLOW_DOCKER=1` (already set in compose).
+- Docker-backed endpoints are disabled by default (`LAB_API_ALLOW_DOCKER=0`).
+  Enable by mounting `/var/run/docker.sock` and setting `LAB_API_ALLOW_DOCKER=1`.

@@ -86,21 +86,22 @@ type HealthResponse = {
   default_dns_server?: string;
 };
 
-type AgentStatusCheck = {
+type RegistryNode = {
   name: string;
+  role: string;
+  ip: string;
+  port: number;
   ok: boolean;
   latency_ms?: number;
-  detail?: string;
+  agent_role: string;
+  agent_version?: string;
+  agent_hostname?: string;
 };
 
-type AgentStatusPayload = {
-  role?: string;
-  checks?: AgentStatusCheck[];
-};
-
-type AgentStatusResponse = {
+type NodesResponse = {
   ok: boolean;
-  agents: Record<string, AgentStatusPayload>;
+  nodes: RegistryNode[];
+  errors?: Record<string, string>;
 };
 
 type TopologyHealth = {
@@ -771,6 +772,10 @@ const TOPOLOGY_NODES: NodeInfo[] = [
   },
 ];
 
+const TOPOLOGY_NODE_MAP = new Map(
+  TOPOLOGY_NODES.map((node) => [node.name, node])
+);
+
 const SCENARIOS: { id: ScenarioId; label: string; note: string; detail: string }[] = [
   {
     id: 'S1',
@@ -874,7 +879,7 @@ const DEFAULT_SECURITY_TABLE: Record<ScenarioId, ScenarioSecurityRow> =
 
 const MVP_UI_NOTES = [
   {
-    title: 'Nodes / Topology',
+    title: 'Nodes',
     items: [
       'Role: authoritative, resolver, client, capture, signer',
       'Lab IPs + ports (53/udp,tcp; 8000; 5173)',
@@ -894,10 +899,33 @@ const MVP_UI_NOTES = [
   },
 ];
 
+const QUICK_LINKS = [
+  {
+    title: 'Grafana',
+    url: 'http://127.0.0.1:3000',
+    desc: 'Dashboards + metrics',
+  },
+  {
+    title: 'Kibana',
+    url: 'http://127.0.0.1:5601',
+    desc: 'Logs + saved searches',
+  },
+  {
+    title: 'Prometheus',
+    url: 'http://127.0.0.1:9090',
+    desc: 'Scrape targets',
+  },
+  {
+    title: 'Lab API',
+    url: 'http://127.0.0.1:8000/docs',
+    desc: 'Control-plane endpoints',
+  },
+];
+
 const SECTION_TABS: { id: SectionId; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'overview', label: 'Overview' },
-  { id: 'topology', label: 'Topology' },
+  { id: 'topology', label: 'Nodes' },
   { id: 'runbook', label: 'Runbook' },
   { id: 'dig', label: 'Dig' },
   { id: 'output', label: 'Output' },
@@ -1527,12 +1555,83 @@ export default function App() {
   const isAuthError = (err: Error) =>
     err.message.includes('HTTP 401') || err.message.includes('HTTP 403');
 
+  const [registryNodes, setRegistryNodes] = useState<RegistryNode[]>([]);
+  const [registryErrors, setRegistryErrors] = useState<Record<string, string>>(
+    {}
+  );
+
   const scrollToConfigs = () => {
     const target = document.getElementById('configs');
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       window.location.hash = 'configs';
     }
+  };
+
+  const formatRoleLabel = (value: string) =>
+    value.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const buildNodeInfoFromRegistry = (node: RegistryNode): NodeInfo => {
+    const base = TOPOLOGY_NODE_MAP.get(node.name);
+    const meta = [
+      ...(base?.meta || []),
+      node.agent_role ? `agent: ${node.agent_role}` : '',
+      node.agent_version ? `agent version: ${node.agent_version}` : '',
+      node.agent_hostname ? `agent host: ${node.agent_hostname}` : '',
+    ].filter(Boolean);
+    return {
+      name: node.name,
+      role: base?.role || formatRoleLabel(node.role || node.name),
+      ip: node.ip || base?.ip || 'unknown',
+      ports: base?.ports || `${node.port}/tcp`,
+      health: node.ok ? 'up' : 'down',
+      tags: base?.tags || [node.agent_role || 'node'],
+      meta,
+    };
+  };
+
+  const renderNodeCard = (node: NodeInfo) => {
+    const nodeHealth = topologyHealth[node.name]?.health ?? node.health;
+    const healthDetail = topologyHealth[node.name]?.detail;
+    const healthTitle = healthDetail
+      ? `Health: ${healthDetail}. Click to open config viewer.`
+      : 'Click to open config viewer.';
+    return (
+      <div key={node.name} className="node-card">
+        <div className="node-header">
+          <div className="node-title">{node.name}</div>
+          <button
+            type="button"
+            className={`status-dot action ${healthClass(nodeHealth)}`}
+            onClick={scrollToConfigs}
+            title={healthTitle}
+          >
+            {healthLabel(nodeHealth)}
+          </button>
+        </div>
+        <div className="node-role">{node.role}</div>
+        <div className="node-meta">
+          <div>
+            <strong>IP:</strong> {node.ip}
+          </div>
+          <div>
+            <strong>Ports:</strong> {node.ports}
+          </div>
+        </div>
+        <div className="node-tags">
+          {node.tags.map((tag) => (
+            <span key={tag} className="tag">
+              {tag}
+            </span>
+          ))}
+        </div>
+        <ul className="node-list">
+          {node.meta.map((meta) => (
+            <li key={meta}>{meta}</li>
+          ))}
+        </ul>
+      </div>
+    );
   };
 
   const refreshTopologyHealth = async () => {
@@ -1613,23 +1712,22 @@ export default function App() {
       markUnknown('resolver_plain', 'missing lab API key');
       markUnknown('dot_proxy', 'missing lab API key');
       markUnknown('doh_proxy', 'missing lab API key');
+      setRegistryNodes([]);
+      setRegistryErrors({ lab_api: 'missing lab API key' });
       setTopologyHealth((prev) => ({ ...prev, ...updates }));
       return;
     }
 
     try {
-      const agent = await getJson<AgentStatusResponse>(
-        `${LAB_API_BASE}/agent/status`,
-        labHeaders
-      );
-      const authChecks = agent.agents.authoritative?.checks || [];
-      const resolverChecks = agent.agents.resolver?.checks || [];
-      for (const check of [...authChecks, ...resolverChecks]) {
-        if (!check.name) continue;
-        const detail = check.ok
-          ? `tcp ${check.latency_ms?.toFixed(1) ?? '?'}ms`
-          : check.detail || 'check failed';
-        markNode(check.name, check.ok, detail);
+      const nodes = await getJson<NodesResponse>(`${LAB_API_BASE}/nodes`, labHeaders);
+      setRegistryNodes(nodes.nodes || []);
+      setRegistryErrors(nodes.errors || {});
+      for (const node of nodes.nodes || []) {
+        if (!node.name) continue;
+        const detail = node.ok
+          ? `tcp ${node.latency_ms?.toFixed(1) ?? '?'}ms`
+          : 'check failed';
+        markNode(node.name, node.ok, detail);
       }
     } catch (err) {
       const error = err as Error;
@@ -1638,11 +1736,15 @@ export default function App() {
         markUnknown('authoritative_child', 'missing lab API key');
         markUnknown('resolver', 'missing lab API key');
         markUnknown('resolver_plain', 'missing lab API key');
+        setRegistryNodes([]);
+        setRegistryErrors({ lab_api: 'missing lab API key' });
       } else {
         markUnknown('authoritative_parent', error.message);
         markUnknown('authoritative_child', error.message);
         markUnknown('resolver', error.message);
         markUnknown('resolver_plain', error.message);
+        setRegistryNodes([]);
+        setRegistryErrors({ lab_api: error.message });
       }
     }
 
@@ -1948,6 +2050,23 @@ export default function App() {
           a.edns_size - b.edns_size || a.qtype.localeCompare(b.qtype)
       ),
     [ampResults]
+  );
+  const registrySummary = useMemo(() => {
+    const total = registryNodes.length;
+    const up = registryNodes.filter((node) => node.ok).length;
+    return { total, up };
+  }, [registryNodes]);
+  const registryNodeNames = useMemo(
+    () => new Set(registryNodes.map((node) => node.name)),
+    [registryNodes]
+  );
+  const extraNodes = useMemo(
+    () => TOPOLOGY_NODES.filter((node) => !registryNodeNames.has(node.name)),
+    [registryNodeNames]
+  );
+  const registryErrorList = useMemo(
+    () => Object.values(registryErrors).filter(Boolean),
+    [registryErrors]
   );
 
   const isSectionVisible = (id: SectionId) =>
@@ -4382,6 +4501,19 @@ export default function App() {
             <div className="overview-sub">Dig + health feedback</div>
           </div>
           <div className="overview-tile">
+            <div className="overview-label">Core Nodes</div>
+            <div className="overview-value">
+              {registrySummary.total
+                ? `${registrySummary.up}/${registrySummary.total} up`
+                : 'Not loaded'}
+            </div>
+            <div className="overview-sub">
+              {registryErrorList.length
+                ? registryErrorList[0]
+                : 'From agent registry'}
+            </div>
+          </div>
+          <div className="overview-tile">
             <div className="overview-label">Availability</div>
             <div className="overview-value">
               {availabilityMetrics ? `${availabilityMetrics.totals.queries} queries` : 'Not loaded'}
@@ -4407,56 +4539,37 @@ export default function App() {
             </div>
           </div>
         </div>
+        <div className="quick-links">
+          {QUICK_LINKS.map((link) => (
+            <a
+              key={link.title}
+              className="quick-link"
+              href={link.url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <div className="quick-title">{link.title}</div>
+              <div className="quick-desc">{link.desc}</div>
+            </a>
+          ))}
+        </div>
       </section>
       )}
 
       {isSectionVisible('topology') && (
       <section className="card" id="topology">
-        <div className="card-title">Nodes / Topology</div>
+        <div className="card-title">Nodes</div>
+        <div className="topology-subtitle">Core DNS nodes (agents)</div>
         <div className="topology-grid">
-          {TOPOLOGY_NODES.map((node) => {
-            const nodeHealth = topologyHealth[node.name]?.health ?? node.health;
-            const healthDetail = topologyHealth[node.name]?.detail;
-            const healthTitle = healthDetail
-              ? `Health: ${healthDetail}. Click to open config viewer.`
-              : 'Click to open config viewer.';
-            return (
-              <div key={node.name} className="node-card">
-                <div className="node-header">
-                  <div className="node-title">{node.name}</div>
-                  <button
-                    type="button"
-                    className={`status-dot action ${healthClass(nodeHealth)}`}
-                    onClick={scrollToConfigs}
-                    title={healthTitle}
-                  >
-                    {healthLabel(nodeHealth)}
-                  </button>
-                </div>
-                <div className="node-role">{node.role}</div>
-                <div className="node-meta">
-                  <div>
-                    <strong>IP:</strong> {node.ip}
-                  </div>
-                  <div>
-                    <strong>Ports:</strong> {node.ports}
-                  </div>
-                </div>
-                <div className="node-tags">
-                  {node.tags.map((tag) => (
-                    <span key={tag} className="tag">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
-                <ul className="node-list">
-                  {node.meta.map((meta) => (
-                    <li key={meta}>{meta}</li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
+          {registryNodes.length ? (
+            registryNodes.map((node) => renderNodeCard(buildNodeInfoFromRegistry(node)))
+          ) : (
+            <div className="status">No agent data. Check Lab API key.</div>
+          )}
+        </div>
+        <div className="topology-subtitle">Services</div>
+        <div className="topology-grid">
+          {extraNodes.map((node) => renderNodeCard(node))}
         </div>
         <div className="topology-notes">
           <div className="notes-panel">

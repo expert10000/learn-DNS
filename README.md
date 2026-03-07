@@ -70,6 +70,9 @@ ELK logs:
 Correlation:
 - Grafana dashboards include links to Kibana Discover for the same time range.
 
+Control plane:
+- `lab_api` exposes `/nodes` aggregated from agent APIs (no Docker socket required).
+
 docker compose up -d --build
 
 Quick start:

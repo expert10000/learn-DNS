@@ -1200,6 +1200,48 @@ button.button-danger:not(:disabled):hover {
   color: var(--muted);
 }
 
+.quick-links {
+  margin-top: 18px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.quick-link {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(var(--accent-rgb), 0.18);
+  background: linear-gradient(135deg, rgba(11, 76, 95, 0.08), rgba(224, 122, 95, 0.08));
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.15s ease, box-shadow 0.2s ease;
+}
+
+.quick-link:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 26px rgba(11, 24, 38, 0.15);
+}
+
+.quick-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.quick-desc {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.topology-subtitle {
+  margin: 12px 0 10px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .topology-grid {
   display: grid;
   gap: 16px;

@@ -12,6 +12,8 @@ app = FastAPI(title="dns-lab agent", version="1.0")
 
 AGENT_ROLE = os.getenv("AGENT_ROLE", "unknown")
 AGENT_API_KEY = os.getenv("AGENT_API_KEY", "")
+AGENT_VERSION = os.getenv("AGENT_VERSION", app.version)
+AGENT_NODE_IP = os.getenv("AGENT_NODE_IP", "")
 MAX_CONFIG_BYTES = int(os.getenv("AGENT_MAX_CONFIG_BYTES", "200000"))
 STATUS_TIMEOUT_S = float(os.getenv("AGENT_STATUS_TIMEOUT_S", "1.0"))
 
@@ -86,6 +88,7 @@ class StatusResponse(BaseModel):
     ok: bool
     role: str
     checks: list[StatusCheck]
+    agent: Optional[dict] = None
 
 class StatsResponse(BaseModel):
     ok: bool
@@ -147,6 +150,13 @@ def health():
 @app.get("/status", response_model=StatusResponse)
 def status(x_agent_key: Optional[str] = Header(default=None)):
     require_agent_key(x_agent_key)
+    hostname = socket.gethostname()
+    ip = AGENT_NODE_IP
+    if not ip:
+        try:
+            ip = socket.gethostbyname(hostname)
+        except Exception:
+            ip = ""
     checks: list[StatusCheck] = []
     all_ok = True
     for target in STATUS_TARGETS:
@@ -177,7 +187,17 @@ def status(x_agent_key: Optional[str] = Header(default=None)):
         )
         if not ok:
             all_ok = False
-    return StatusResponse(ok=all_ok, role=AGENT_ROLE, checks=checks)
+    return StatusResponse(
+        ok=all_ok,
+        role=AGENT_ROLE,
+        checks=checks,
+        agent={
+            "role": AGENT_ROLE,
+            "version": AGENT_VERSION,
+            "hostname": hostname,
+            "ip": ip,
+        },
+    )
 
 @app.get("/stats", response_model=StatsResponse)
 def stats(x_agent_key: Optional[str] = Header(default=None)):

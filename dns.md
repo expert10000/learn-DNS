@@ -538,3 +538,7 @@ Grafana dashboards link directly to Kibana Discover with the active time range.
 
 Saved searches for validation failures and NXDOMAIN floods are included in:
 - `observability/kibana/saved_objects.ndjson`
+
+## Control Plane (Nodes Registry)
+`lab_api` aggregates resolver/authoritative agent status into `/nodes`, providing
+roles, IPs, and versions without Docker socket access.
