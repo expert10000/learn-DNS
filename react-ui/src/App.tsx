@@ -51,6 +51,14 @@ type LabDigResponse = {
   stderr: string;
 };
 
+type CmdResponse = {
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
 type MaintenanceResponse = {
   ok: boolean;
   command: string;
@@ -241,13 +249,30 @@ type CaptureSummaryResponse = {
   stderr_upstream: string;
 };
 
-type CaptureHealthResponse = {
-  ok: boolean;
-  target: CaptureTarget;
-  running: boolean;
-  pid?: number;
-  detail?: string;
+type DemoAggressiveNsecPhase = {
+  aggressive_nsec: boolean;
+  dig_first: CmdResponse;
+  dig_last: CmdResponse;
+  loop: CmdResponse;
+  stats_before: Record<string, number>;
+  stats_after: Record<string, number>;
+  delta: Record<string, number>;
+  capture_file?: string | null;
 };
+
+type DemoAggressiveNsecResponse = {
+  ok: boolean;
+  zone: string;
+  count: number;
+  qps: number;
+  profile: string;
+  resolver: string;
+  phases: DemoAggressiveNsecPhase[];
+  artifact_json?: string;
+  artifact_zip?: string;
+  notes?: string[];
+};
+
 
 type SigningSwitchRequest = {
   mode: 'nsec' | 'nsec3';
@@ -1240,80 +1265,6 @@ function parseQnameMinimisation(content: string) {
   return { enabled, detail: `qname-minimisation: ${match[1].toLowerCase()}` };
 }
 
-function parseNsecInterval(output: string) {
-  for (const line of output.split('\n')) {
-    const match = line.match(/^(\S+)\s+\d+\s+IN\s+NSEC\s+(\S+)/i);
-    if (match) {
-      return { owner: match[1], next: match[2] };
-    }
-  }
-  return null;
-}
-
-function normalizeName(name: string) {
-  return name.endsWith('.') ? name.slice(0, -1) : name;
-}
-
-function splitLabels(name: string) {
-  const clean = normalizeName(name).toLowerCase();
-  return clean.length ? clean.split('.') : [];
-}
-
-function compareLabel(a: string, b: string) {
-  if (a.length !== b.length) {
-    return a.length < b.length ? -1 : 1;
-  }
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-}
-
-function compareName(a: string, b: string) {
-  const aLabels = splitLabels(a);
-  const bLabels = splitLabels(b);
-  let ai = aLabels.length - 1;
-  let bi = bLabels.length - 1;
-  while (ai >= 0 && bi >= 0) {
-    const cmp = compareLabel(aLabels[ai], bLabels[bi]);
-    if (cmp !== 0) {
-      return cmp;
-    }
-    ai -= 1;
-    bi -= 1;
-  }
-  if (ai < 0 && bi < 0) {
-    return 0;
-  }
-  return ai < 0 ? -1 : 1;
-}
-
-function isBetween(owner: string, next: string, candidate: string) {
-  const cmpOwnerNext = compareName(owner, next);
-  const cmpOwnerCand = compareName(owner, candidate);
-  const cmpCandNext = compareName(candidate, next);
-  if (cmpOwnerNext < 0) {
-    return cmpOwnerCand < 0 && cmpCandNext < 0;
-  }
-  return cmpOwnerCand > 0 || cmpCandNext < 0;
-}
-
-function pickLabelBetween(owner: string, next: string, zone: string) {
-  const candidates = ['a', 'b', 'c', 'm', 'n', 't', 'x', 'y', 'z', 'zz', 'zzz'];
-  for (const cand of candidates) {
-    const full = `${cand}.${zone}`;
-    if (isBetween(owner, next, full)) {
-      return full;
-    }
-  }
-  for (let i = 0; i < 20; i += 1) {
-    const rand = Math.random().toString(36).slice(2, 8);
-    const full = `p-${rand}.${zone}`;
-    if (isBetween(owner, next, full)) {
-      return full;
-    }
-  }
-  return null;
-}
-
 export default function App() {
   const [req, setReq] = useState<DigRequest>(DEFAULT_REQUEST);
   const [backend, setBackend] = useState<Backend>('client');
@@ -1401,6 +1352,11 @@ export default function App() {
   const [proofStatus, setProofStatus] = useState('');
   const [proofOutput, setProofOutput] = useState('');
   const [proofCaptureFile, setProofCaptureFile] = useState('');
+  const [proofArtifactFile, setProofArtifactFile] = useState('');
+  const [proofCount, setProofCount] = useState(100);
+  const [proofQps, setProofQps] = useState(50);
+  const [proofCaptureTarget, setProofCaptureTarget] =
+    useState<CaptureTarget>('resolver');
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [privacyStatus, setPrivacyStatus] = useState('');
   const [privacyOutput, setPrivacyOutput] = useState('');
@@ -2701,134 +2657,90 @@ export default function App() {
       setProofStatus('Missing Lab API key.');
       return;
     }
-
-    const zone = 'example.test';
-    const base: DigRequest = {
-      ...req,
-      client: 'trusted',
-      resolver: 'valid',
-      qtype: 'A',
-      dnssec: true,
-      trace: false,
-      short: false,
-    };
-    const firstReq: DigRequest = {
-      ...base,
-      name: `nope1-${Math.random().toString(36).slice(2, 7)}.${zone}`,
-    };
-    let secondReq: DigRequest = {
-      ...base,
-      name: `nope2-${Math.random().toString(36).slice(2, 7)}.${zone}`,
-    };
-
     setProofBusy(true);
-    setProofStatus('Cold run: restarting resolver...');
+    setProofStatus('Running aggressive NSEC demo (OFF → ON)...');
     setProofOutput('');
     setProofCaptureFile('');
+    setProofArtifactFile('');
 
     try {
-      await postJson<LabDigResponse>(
-        `${LAB_API_BASE}/resolver/restart`,
-        {},
+      const result = await postJson<DemoAggressiveNsecResponse>(
+        `${LAB_API_BASE}/demo/aggressive-nsec`,
+        {
+          profile: 'trusted',
+          resolver: 'valid',
+          zone: 'example.test',
+          count: proofCount,
+          qps: proofQps,
+          capture: true,
+          capture_target: proofCaptureTarget,
+          cold_restart: true,
+          restore: true,
+          zip: true,
+        },
         labHeaders
       );
-      await new Promise((resolve) => setTimeout(resolve, 5000));
 
-      setProofStatus('Cold run: starting authoritative capture...');
-      const start = await postJson<CaptureStartResponse>(
-        `${LAB_API_BASE}/capture/start`,
-        { target: 'authoritative', filter: 'dns' },
-        labHeaders
-      );
-      setProofCaptureFile(start.file);
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      const health = await getJson<CaptureHealthResponse>(
-        `${LAB_API_BASE}/capture/health?target=authoritative`,
-        labHeaders
-      );
-      if (!health.running) {
-        setProofStatus('Capture did not start. Check capture container.');
-        setProofOutput(health.detail || 'Capture health check failed.');
-        await postJson<CaptureStopResponse>(
-          `${LAB_API_BASE}/capture/stop`,
-          { target: 'authoritative' },
-          labHeaders
+      const capture =
+        result.phases.find((phase) => phase.aggressive_nsec && phase.capture_file)
+          ?.capture_file ||
+        result.phases.find((phase) => phase.capture_file)?.capture_file ||
+        '';
+      setProofCaptureFile(capture || '');
+      const artifact = result.artifact_zip || result.artifact_json || '';
+      setProofArtifactFile(artifact);
+
+      const lines: string[] = [];
+      lines.push(`# Aggressive NSEC demo (${result.zone})`);
+      lines.push(`queries: ${result.count}, qps: ${result.qps}`);
+      if (artifact) {
+        lines.push(`artifact: ${artifact}`);
+      }
+      if (result.notes && result.notes.length > 0) {
+        lines.push('');
+        lines.push('Notes:');
+        result.notes.forEach((note) => lines.push(`- ${note}`));
+      }
+
+      result.phases.forEach((phase) => {
+        const label = phase.aggressive_nsec ? 'ON' : 'OFF';
+        lines.push('');
+        lines.push(`## Phase ${label}`);
+        lines.push(`delta.queries: ${phase.delta.queries ?? '—'}`);
+        lines.push(`delta.cache_hits: ${phase.delta.cache_hits ?? '—'}`);
+        lines.push(`delta.cache_miss: ${phase.delta.cache_miss ?? '—'}`);
+        lines.push(`delta.nxdomain: ${phase.delta.nxdomain ?? '—'}`);
+        lines.push(
+          `delta.aggressive_nxdomain: ${phase.delta.aggressive_nxdomain ?? '—'}`
         );
-        return;
-      }
-
-      setProofStatus('Cold run: running aggressive NSEC proof...');
-      const first = await executeLabDig(firstReq);
-      const interval = parseNsecInterval(first.output.text);
-      if (interval) {
-        const picked = pickLabelBetween(interval.owner, interval.next, zone);
-        if (picked) {
-          secondReq = { ...base, name: picked };
-        }
-      }
-      const second = await executeLabDig(secondReq);
-
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      setProofStatus('Cold run: stopping capture...');
-      const stopped = await postJson<CaptureStopResponse>(
-        `${LAB_API_BASE}/capture/stop`,
-        { target: 'authoritative' },
-        labHeaders
-      );
-
-      const file = stopped.file || start.file;
-      setProofCaptureFile(file || '');
-
-      let summaryText = 'No capture summary.';
-      if (file) {
-        const summary = await getJson<CaptureSummaryResponse>(
-          `${LAB_API_BASE}/capture/summary?file=${encodeURIComponent(file)}`,
-          labHeaders
+        lines.push(
+          `delta.recursivereplies: ${phase.delta.recursivereplies ?? '—'}`
         );
-        const warningLines: string[] = [];
-        if (summary.total_packets === 0) {
-          warningLines.push(
-            'WARNING: capture empty (0 packets). Capture likely missed or tcpdump failed.'
-          );
-        } else if (summary.upstream_queries === 0) {
-          warningLines.push(
-            'WARNING: no resolver -> authoritative traffic captured (cache hit likely).'
-          );
+        if (phase.capture_file) {
+          lines.push(`capture: ${phase.capture_file}`);
         }
-        summaryText = [
-          '# Capture summary',
-          `file: ${summary.file}`,
-          `total DNS packets: ${summary.total_packets}`,
-          `upstream queries (resolver -> authoritative): ${summary.upstream_queries}`,
-          ...(warningLines.length ? ['', ...warningLines] : []),
-        ].join('\n');
-        if (warningLines.length) {
-          setProofStatus(
-            'Cold run finished, but capture is empty. Try again or check capture target.'
-          );
-        }
-      }
+        lines.push('');
+        lines.push(`dig first: ${phase.dig_first.command}`);
+        lines.push(
+          phase.dig_first.stdout.trim() ||
+            phase.dig_first.stderr.trim() ||
+            'no output'
+        );
+        lines.push('');
+        lines.push(`dig last: ${phase.dig_last.command}`);
+        lines.push(
+          phase.dig_last.stdout.trim() ||
+            phase.dig_last.stderr.trim() ||
+            'no output'
+        );
+      });
 
-      const combinedText = [
-        '# Aggressive NSEC proof (expected NXDOMAIN)',
-        `# Query 1: ${firstReq.name}`,
-        first.output.command,
-        '',
-        first.output.text,
-        '',
-        `# Query 2: ${secondReq.name}`,
-        second.output.command,
-        '',
-        second.output.text,
-        '',
-        summaryText,
-      ].join('\n');
-
-      setProofOutput(combinedText);
-      if (!summaryText.includes('WARNING')) {
-        setProofStatus('Cold run completed.');
-      }
+      setProofOutput(lines.join('\n'));
+      setProofStatus(
+        result.ok
+          ? 'Aggressive NSEC demo completed.'
+          : 'Aggressive NSEC demo completed with warnings.'
+      );
     } catch (err) {
       setProofOutput('');
       await maybeAttachStartupDiagnostics(
@@ -3383,6 +3295,35 @@ export default function App() {
       setCaptureStatus(`Downloaded ${file}`);
     } catch (err) {
       setCaptureStatus((err as Error).message);
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
+  const downloadDemoArtifact = async (file: string) => {
+    setIsBusy(true);
+    setProofStatus(`Downloading artifact ${file}...`);
+    try {
+      const res = await fetch(
+        `${LAB_API_BASE}/demo/download?file=${encodeURIComponent(file)}`,
+        { headers: labHeaders }
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`HTTP ${res.status}: ${text}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      setProofStatus(`Artifact downloaded: ${file}`);
+    } catch (err) {
+      setProofStatus(`Artifact download failed: ${(err as Error).message}`);
     } finally {
       setIsBusy(false);
     }
@@ -5068,11 +5009,48 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
           <div className="preset">
             <div className="preset-title">Aggressive NSEC Proof (Cold)</div>
             <div className="preset-desc">
-              Runs two NXDOMAIN queries with a cold resolver cache and captures
-              authoritative traffic for verification.
+              Runs an OFF → ON aggressive-NSEC demo (NXDOMAIN batch) and stores
+              a JSON/ZIP artifact with stats + sample dig output.
             </div>
             <div className="preset-note">
               This proof intentionally uses two non-existent names. NXDOMAIN is expected.
+            </div>
+            <div className="grid">
+              <label>
+                NXDOMAIN count
+                <input
+                  type="number"
+                  min={10}
+                  max={200}
+                  value={proofCount}
+                  onChange={(e) => setProofCount(Number(e.target.value))}
+                  disabled={isBusy || proofBusy}
+                />
+              </label>
+              <label>
+                QPS
+                <input
+                  type="number"
+                  min={1}
+                  max={200}
+                  value={proofQps}
+                  onChange={(e) => setProofQps(Number(e.target.value))}
+                  disabled={isBusy || proofBusy}
+                />
+              </label>
+              <label>
+                Capture target
+                <select
+                  value={proofCaptureTarget}
+                  onChange={(e) =>
+                    setProofCaptureTarget(e.target.value as CaptureTarget)
+                  }
+                  disabled={isBusy || proofBusy}
+                >
+                  <option value="resolver">Resolver</option>
+                  <option value="authoritative">Authoritative</option>
+                </select>
+              </label>
             </div>
             <div className="actions">
               <button
@@ -5089,13 +5067,33 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
               >
                 Download PCAP
               </button>
+              <button
+                onClick={() =>
+                  proofArtifactFile && downloadDemoArtifact(proofArtifactFile)
+                }
+                disabled={
+                  isBusy || proofBusy || missingLabKey || !proofArtifactFile
+                }
+              >
+                Download Artifact
+              </button>
             </div>
           </div>
       </div>
       <div className="status">
         {proofStatus ||
-          'Run the cold proof to capture authoritative traffic and count upstream queries.'}
+          'Run the demo to capture traffic, compare stats, and download the artifact.'}
       </div>
+      {proofArtifactFile && (
+        <div className="actions">
+          <button
+            onClick={() => downloadDemoArtifact(proofArtifactFile)}
+            disabled={isBusy || proofBusy || missingLabKey}
+          >
+            Download Artifact ({proofArtifactFile})
+          </button>
+        </div>
+      )}
       <pre className="output">{proofOutput || 'No proof output yet.'}</pre>
       </section>
       )}

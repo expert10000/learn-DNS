@@ -374,7 +374,7 @@ services:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "127.0.0.1:9090:9090"
+      - "0.0.0.0:9090:9090"
     depends_on:
       - cadvisor
     healthcheck:
@@ -403,7 +403,7 @@ services:
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "127.0.0.1:3000:3000"
+      - "0.0.0.0:3000:3000"
     depends_on:
       - prometheus
     healthcheck:
@@ -580,7 +580,7 @@ services:
       observability_net:
         ipv4_address: 172.35.0.21
     ports:
-      - "127.0.0.1:5601:5601"
+      - "0.0.0.0:5601:5601"
     depends_on:
       - elasticsearch
 
@@ -620,7 +620,7 @@ services:
       com.dns.role: "dns_lab_api"
     environment:
       - LAB_API_KEY=change_me_long_random
-      - LAB_API_ALLOW_DOCKER=0
+      - LAB_API_ALLOW_DOCKER=1
       - LAB_API_RATE_LIMIT_PER_MIN=120
       - LAB_API_RATE_LIMIT_WINDOW_S=60
       - LAB_API_AUDIT_LOG=/var/log/lab_api/audit.log
@@ -650,7 +650,7 @@ services:
         ipv4_address: 172.34.0.90
     # Bind ONLY to localhost of the VM
     ports:
-      - "127.0.0.1:8000:8000"
+      - "0.0.0.0:8000:8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\""]
       interval: 30s
@@ -669,6 +669,7 @@ services:
       - ./anchors:/config/unbound/anchors:ro
       - ./captures:/captures
       - ./lab_api/log:/var/log/lab_api
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   agent_authoritative:
     build: ./agent_api
@@ -952,7 +953,7 @@ networks:
 
   observability_net:
     driver: bridge
-    internal: true
+    internal: false
     ipam:
       config:
         - subnet: 172.35.0.0/24

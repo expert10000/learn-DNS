@@ -12,6 +12,7 @@ import time
 import threading
 import base64
 import shlex
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
@@ -236,6 +237,7 @@ CONFIG_DIRS = {
 MAX_CONFIG_BYTES = 200_000
 
 CAPTURE_DIR = Path("/captures")
+DEMO_DIR = CAPTURE_DIR / "demo"
 CAPTURE_TARGETS = {
     "resolver": os.getenv("CAPTURE_RESOLVER_CONTAINER", "dns_resolver"),
     "authoritative": os.getenv(
@@ -318,6 +320,10 @@ MAX_EMAIL_SUBJECT_CHARS = 200
 MAX_MAIL_LOG_LINES = 1000
 MAX_MAIL_LOG_GREP_CHARS = 120
 MAX_IMAP_LINES = 500
+MAX_DEMO_NX_COUNT = 200
+MAX_DEMO_QPS = 200
+DEFAULT_DEMO_NX_COUNT = 100
+DEFAULT_DEMO_QPS = 50
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
 MAILBOX_RE = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -444,6 +450,40 @@ class CaptureSummaryResponse(BaseModel):
     stdout_upstream: str
     stderr_total: str
     stderr_upstream: str
+
+class DemoAggressiveNsecRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    zone: str = "example.test"
+    count: int = DEFAULT_DEMO_NX_COUNT
+    qps: int = DEFAULT_DEMO_QPS
+    capture: bool = True
+    capture_target: Literal["resolver", "authoritative"] = "resolver"
+    cold_restart: bool = True
+    restore: bool = True
+    zip: bool = True
+
+class DemoAggressiveNsecPhase(BaseModel):
+    aggressive_nsec: bool
+    dig_first: CmdResponse
+    dig_last: CmdResponse
+    loop: CmdResponse
+    stats_before: dict[str, float]
+    stats_after: dict[str, float]
+    delta: dict[str, float]
+    capture_file: Optional[str] = None
+
+class DemoAggressiveNsecResponse(BaseModel):
+    ok: bool
+    zone: str
+    count: int
+    qps: int
+    profile: str
+    resolver: str
+    phases: list[DemoAggressiveNsecPhase]
+    artifact_json: Optional[str] = None
+    artifact_zip: Optional[str] = None
+    notes: list[str] = []
 
 class CaptureHealthResponse(BaseModel):
     ok: bool
@@ -1240,6 +1280,50 @@ def _pick_stat(stats: dict[str, float], keys: list[str]) -> float:
             return stats[key]
     return 0.0
 
+def _read_unbound_stats(container: str) -> dict[str, float]:
+    res = docker_exec(
+        container,
+        "/opt/unbound/sbin/unbound-control -c /opt/unbound/etc/unbound/unbound.conf stats_noreset",
+        timeout_s=8,
+    )
+    if res.exit_code != 0:
+        raise HTTPException(status_code=502, detail=res.stderr or "Failed to read stats")
+    return _parse_unbound_stats(res.stdout)
+
+def _extract_unbound_counters(stats: dict[str, float]) -> dict[str, float]:
+    return {
+        "queries": _pick_stat(stats, ["total.num.queries", "num.queries"]),
+        "cache_hits": _pick_stat(stats, ["total.num.cachehits", "num.cachehits"]),
+        "cache_miss": _pick_stat(stats, ["total.num.cachemiss", "num.cachemiss"]),
+        "nxdomain": _pick_stat(
+            stats,
+            [
+                "num.answer.rcode.NXDOMAIN",
+                "total.num.query.rcode.NXDOMAIN",
+                "num.query.rcode.NXDOMAIN",
+            ],
+        ),
+        "servfail": _pick_stat(
+            stats,
+            [
+                "num.answer.rcode.SERVFAIL",
+                "total.num.query.rcode.SERVFAIL",
+                "num.query.rcode.SERVFAIL",
+            ],
+        ),
+        "aggressive_nxdomain": _pick_stat(
+            stats,
+            ["num.query.aggressive.NXDOMAIN", "total.num.query.aggressive.NXDOMAIN"],
+        ),
+        "recursivereplies": _pick_stat(
+            stats, ["total.num.recursivereplies", "num.recursivereplies"]
+        ),
+    }
+
+def _diff_counters(before: dict[str, float], after: dict[str, float]) -> dict[str, float]:
+    keys = set(before.keys()) | set(after.keys())
+    return {key: after.get(key, 0.0) - before.get(key, 0.0) for key in keys}
+
 UNBOUND_CONFIGS = [
     Path("/config/unbound/unbound.conf"),
     Path("/config/unbound/unbound.plain.conf"),
@@ -1649,6 +1733,9 @@ def _extract_rrl_block(text: str) -> str:
 def _resolver_container(kind: Literal["valid", "plain"]) -> str:
     return RESOLVER_CONTAINER if kind == "valid" else RESOLVER_PLAIN_CONTAINER
 
+def _unbound_config_path(kind: Literal["valid", "plain"]) -> Path:
+    return UNBOUND_CONFIGS[0] if kind == "valid" else UNBOUND_CONFIGS[1]
+
 def _resolver_cpu_pct(container: str) -> Optional[float]:
     res = docker_cmd(
         ["stats", "--no-stream", "--format", "{{.CPUPerc}}", container],
@@ -1713,6 +1800,11 @@ def _resolver_mem_stats(container: str) -> tuple[Optional[int], Optional[int]]:
 def ensure_capture_dir():
     if not CAPTURE_DIR.exists():
         raise HTTPException(status_code=500, detail="Capture directory not mounted")
+
+def ensure_demo_dir():
+    ensure_capture_dir()
+    if not DEMO_DIR.exists():
+        DEMO_DIR.mkdir(parents=True, exist_ok=True)
 
 def _mail_log_file() -> str:
     res = docker_exec_root(
@@ -3746,6 +3838,230 @@ def capture_summary(
         stderr_total=total.stderr,
         stderr_upstream=upstream.stderr,
     )
+
+@app.post("/demo/aggressive-nsec", response_model=DemoAggressiveNsecResponse)
+def demo_aggressive_nsec(
+    req: DemoAggressiveNsecRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+    ensure_demo_dir()
+
+    if req.count < 10 or req.count > MAX_DEMO_NX_COUNT:
+        raise HTTPException(status_code=400, detail="Invalid count")
+    if req.qps < 1 or req.qps > MAX_DEMO_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps")
+
+    zone = validate_name(req.zone)
+    resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+    client_container = CLIENT_CONTAINER_BY_PROFILE[req.profile]
+    resolver_container = _resolver_container(req.resolver)
+    config_path = _unbound_config_path(req.resolver)
+    original_text = _read_text(config_path)
+    original_cfg = _parse_unbound_config(original_text)
+    notes: list[str] = []
+
+    def restart_resolver() -> None:
+        res = docker_cmd(["restart", resolver_container], timeout_s=20)
+        if res.exit_code != 0:
+            raise HTTPException(
+                status_code=502, detail=res.stderr or "Failed to restart resolver"
+            )
+        time.sleep(4)
+
+    def flush_zone() -> None:
+        docker_exec(
+            resolver_container,
+            f"/opt/unbound/sbin/unbound-control -c /opt/unbound/etc/unbound/unbound.conf flush_zone {zone}",
+            timeout_s=8,
+        )
+
+    def apply_aggressive(enabled: bool) -> bool:
+        text = _read_text(config_path)
+        cfg = _parse_unbound_config(text)
+        if cfg.aggressive_nsec == enabled:
+            return False
+        cfg.aggressive_nsec = enabled
+        _write_text(config_path, _apply_unbound_config(text, cfg))
+        restart_resolver()
+        return True
+
+    def build_names(count: int) -> list[str]:
+        token = secrets.token_hex(3)
+        return [f"nx-{token}-{idx}.{zone}" for idx in range(count)]
+
+    def run_phase(enabled: bool) -> DemoAggressiveNsecPhase:
+        changed = apply_aggressive(enabled)
+        if req.cold_restart:
+            if not changed:
+                restart_resolver()
+        else:
+            try:
+                flush_zone()
+            except HTTPException:
+                pass
+
+        stats_before = _extract_unbound_counters(
+            _read_unbound_stats(resolver_container)
+        )
+        names = build_names(req.count)
+        first_name = names[0]
+        last_name = names[-1]
+        middle_names = names[1:-1]
+
+        capture_file: Optional[str] = None
+        if req.capture:
+            start = capture_start(
+                CaptureStartRequest(target=req.capture_target, filter="dns"),
+                x_api_key=x_api_key,
+                request=request,
+            )
+            capture_file = start.file
+
+        try:
+            dig_first = docker_exec(
+                client_container,
+                f"dig @{resolver_ip} {first_name} A +time=1 +tries=1 +dnssec",
+                timeout_s=8,
+            )
+
+            sleep_s = 1.0 / req.qps if req.qps > 0 else 0.0
+            sleep_cmd = f"sleep {sleep_s:.3f};" if sleep_s > 0 else ""
+            if middle_names:
+                names_str = " ".join(middle_names)
+                loop_cmd = (
+                    f"for name in {names_str}; do "
+                    f"dig @{resolver_ip} $name A +time=1 +tries=1 +dnssec >/dev/null; "
+                    f"{sleep_cmd} done"
+                )
+            else:
+                loop_cmd = "true"
+
+            timeout_s = max(10, int(len(middle_names) * max(sleep_s, 0.02) + 10))
+            loop = docker_exec(client_container, loop_cmd, timeout_s=min(120, timeout_s))
+
+            dig_last = docker_exec(
+                client_container,
+                f"dig @{resolver_ip} {last_name} A +time=1 +tries=1 +dnssec",
+                timeout_s=8,
+            )
+        finally:
+            if req.capture:
+                try:
+                    stopped = capture_stop(
+                        CaptureStopRequest(target=req.capture_target),
+                        x_api_key=x_api_key,
+                        request=request,
+                    )
+                    capture_file = stopped.file or capture_file
+                except HTTPException as exc:
+                    notes.append(f"capture stop failed: {exc.detail}")
+
+        stats_after = _extract_unbound_counters(
+            _read_unbound_stats(resolver_container)
+        )
+        delta = _diff_counters(stats_before, stats_after)
+
+        return DemoAggressiveNsecPhase(
+            aggressive_nsec=enabled,
+            dig_first=dig_first,
+            dig_last=dig_last,
+            loop=loop,
+            stats_before=stats_before,
+            stats_after=stats_after,
+            delta=delta,
+            capture_file=capture_file,
+        )
+
+    phases: list[DemoAggressiveNsecPhase] = []
+    ok = True
+    try:
+        phases.append(run_phase(False))
+        phases.append(run_phase(True))
+        ok = all(
+            phase.loop.ok and phase.dig_first.ok and phase.dig_last.ok
+            for phase in phases
+        )
+    finally:
+        if req.restore:
+            current_text = _read_text(config_path)
+            current_cfg = _parse_unbound_config(current_text)
+            if current_cfg.aggressive_nsec != original_cfg.aggressive_nsec:
+                _write_text(config_path, original_text)
+                try:
+                    restart_resolver()
+                except HTTPException:
+                    notes.append("failed to restore resolver after demo")
+                else:
+                    notes.append(
+                        f"restored aggressive-nsec={original_cfg.aggressive_nsec}"
+                    )
+
+    response = DemoAggressiveNsecResponse(
+        ok=ok,
+        zone=zone,
+        count=req.count,
+        qps=req.qps,
+        profile=req.profile,
+        resolver=req.resolver,
+        phases=phases,
+        notes=notes,
+    )
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    artifact_name = f"demo-aggressive-nsec-{stamp}.json"
+    artifact_path = DEMO_DIR / artifact_name
+    payload = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "request": req.model_dump(),
+        "result": response.model_dump(),
+    }
+    artifact_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    response.artifact_json = artifact_name
+
+    if req.zip:
+        zip_name = f"demo-aggressive-nsec-{stamp}.zip"
+        zip_path = DEMO_DIR / zip_name
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(artifact_path, arcname=artifact_name)
+            for phase in phases:
+                if not phase.capture_file:
+                    continue
+                pcap_path = (CAPTURE_DIR / phase.capture_file).resolve()
+                if CAPTURE_DIR in pcap_path.parents and pcap_path.exists():
+                    zf.write(pcap_path, arcname=phase.capture_file)
+        response.artifact_zip = zip_name
+
+    if request:
+        audit_log(
+            request,
+            "demo_aggressive_nsec",
+            {"ok": ok, "count": req.count, "resolver": req.resolver},
+        )
+
+    return response
+
+@app.get("/demo/download")
+def demo_download(
+    file: str,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    require_key(x_api_key)
+    ensure_demo_dir()
+    name = (file or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Missing file")
+    if ".." in name or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    full = (DEMO_DIR / name).resolve()
+    if DEMO_DIR not in full.parents:
+        raise HTTPException(status_code=403, detail="Path not allowed")
+    if not full.exists():
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    media_type = "application/zip" if name.endswith(".zip") else "application/json"
+    return FileResponse(path=full, media_type=media_type, filename=name)
 
 @app.post("/signing/switch", response_model=SigningSwitchResponse)
 def signing_switch(

@@ -250,12 +250,18 @@ Offline NSEC3 expected authority:
 - `SOA + RRSIG + NSEC3 + RRSIG + NSEC3PARAM`
 
 ### Aggressive NSEC Demo
-Run Demo fires two NXDOMAIN queries in a row; the second should be synthesized
-from cached denial proofs.
+Run Proof (Cold) runs an OFF → ON aggressive-NSEC demo with a batch of NXDOMAIN
+queries and collects Unbound stats deltas.
 
-Run Demo + Proof:
-- Captures authoritative traffic and summarizes upstream queries.
-- Uses the authoritative capture target in the Lab API.
+Proof flow:
+- Cold restart (optional).
+- NXDOMAIN batch with aggressive-nsec OFF, then ON.
+- Optional capture (resolver or authoritative).
+
+Artifacts:
+- JSON (stats + dig outputs) and optional ZIP (JSON + PCAP).
+- Stored under `captures/demo` and downloadable via `/demo/download?file=...`.
+- Requires `LAB_API_ALLOW_DOCKER=1` and a read-only Docker socket mount.
 
 Cache controls:
 - Restart resolver (clear cache): full cold cache.

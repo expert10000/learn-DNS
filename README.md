@@ -73,6 +73,16 @@ Correlation:
 Control plane:
 - `lab_api` exposes `/nodes` aggregated from agent APIs (no Docker socket required).
 
+## Demos
+- Aggressive NSEC demo runs OFF → ON and captures stats for a repeatable proof.
+- UI stores a JSON/ZIP artifact and allows download.
+- Artifacts are saved under `captures/demo` and served via `lab_api` at `/demo/download?file=...`.
+
+## Lab API Docker Access
+- Demo/capture endpoints require Docker access.
+- Enable `LAB_API_ALLOW_DOCKER=1` for `lab_api`.
+- Mount the Docker socket read-only: `/var/run/docker.sock:/var/run/docker.sock:ro`.
+
 docker compose up -d --build
 
 Quick start:
