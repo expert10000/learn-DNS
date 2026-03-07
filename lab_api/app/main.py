@@ -211,6 +211,7 @@ CAPTURE_FILTERS = {
     "all": "",
 }
 
+AUTH_PARENT_IP = os.getenv("AUTH_PARENT_IP", "172.31.0.10")
 AUTH_CHILD_IP = os.getenv("AUTH_CHILD_IP", "172.31.0.11")
 RESOLVER_CORE_IP = os.getenv("RESOLVER_CORE_IP", "172.31.0.20")
 DOT_RESOLVER_IP = os.getenv("DOT_RESOLVER_IP", "172.30.0.20")
@@ -414,6 +415,19 @@ class SigningSwitchResponse(BaseModel):
     mode: Literal["nsec", "nsec3"]
     steps: list[SigningStep]
 
+class RunbookStep(BaseModel):
+    step: str
+    ok: bool
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
+class RunbookResponse(BaseModel):
+    ok: bool
+    runbook: str
+    steps: list[RunbookStep]
+
 class ResolverRestartResponse(BaseModel):
     ok: bool
     command: str
@@ -462,6 +476,17 @@ class EmailSendRequest(BaseModel):
     class Config:
         allow_population_by_field_name = True
 
+class EmailUserAddRequest(BaseModel):
+    email: str
+    password: str
+
+class EmailUserUpdateRequest(BaseModel):
+    email: str
+    password: str
+
+class EmailUserDeleteRequest(BaseModel):
+    email: str
+
 class EmailLogResponse(BaseModel):
     ok: bool
     file: str
@@ -474,6 +499,47 @@ class EmailImapCheckRequest(BaseModel):
     user: str
     mailbox: str = "INBOX"
     limit: int = 40
+
+class EmailMessageSummary(BaseModel):
+    id: str
+    source: Literal["uid", "file"]
+    mailbox: str
+    subject: str = ""
+    from_addr: str = ""
+    to_addr: str = ""
+    date: str = ""
+
+class EmailMessageListRequest(BaseModel):
+    user: str
+    mailbox: str = "INBOX"
+    limit: int = 40
+
+class EmailMessageListResponse(BaseModel):
+    ok: bool
+    mailbox: str
+    messages: list[EmailMessageSummary]
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+
+class EmailMessageViewRequest(BaseModel):
+    user: str
+    mailbox: str = "INBOX"
+    message_id: str
+    source: Literal["uid", "file"] = "uid"
+    max_lines: int = 200
+
+class EmailMessageViewResponse(BaseModel):
+    ok: bool
+    mailbox: str
+    message_id: str
+    source: Literal["uid", "file"]
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
+    content: str
 
 class AmplificationTestRequest(BaseModel):
     profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
@@ -503,7 +569,7 @@ class AmplificationResult(BaseModel):
     tc_rate: float
     tcp_rate: float
     avg_latency_ms: float
-    p95_latency_ms: int
+    p95_latency_ms: float
     avg_udp_size: float
     max_udp_size: int
     avg_tcp_size: float
@@ -561,11 +627,12 @@ class AvailabilityProbeResponse(BaseModel):
     name: str
     qtype: str
     count: int
-    min_ms: int
-    max_ms: int
-    avg_ms: int
-    p50_ms: int
-    p95_ms: int
+    min_ms: float
+    max_ms: float
+    avg_ms: float
+    p50_ms: float
+    p95_ms: float
+    p99_ms: float
     rcode_counts: dict[str, int]
 
 class FloodTestRequest(BaseModel):
@@ -701,7 +768,7 @@ class MixLoadResponse(BaseModel):
     tc_rate: float
     tcp_rate: float
     avg_latency_ms: float
-    p95_latency_ms: int
+    p95_latency_ms: float
     avg_udp_size: float
     max_udp_size: int
     avg_tcp_size: float
@@ -1046,7 +1113,7 @@ def _udp_query(
     qtype: str,
     edns_size: Optional[int] = None,
     dnssec: bool = False,
-) -> tuple[int, Optional[str], int, bool]:
+) -> tuple[float, Optional[str], int, bool]:
     _, query = _build_query(name, qtype, edns_size=edns_size, dnssec=dnssec)
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(2)
@@ -1056,7 +1123,7 @@ def _udp_query(
         response, _ = sock.recvfrom(4096)
     finally:
         sock.close()
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
     rcode = _parse_rcode(response)
     tc = _parse_tc(response)
     return elapsed_ms, rcode, len(response), tc
@@ -1067,7 +1134,7 @@ def _tcp_query(
     qtype: str,
     edns_size: Optional[int] = None,
     dnssec: bool = False,
-) -> tuple[int, Optional[str], int, bool]:
+) -> tuple[float, Optional[str], int, bool]:
     _, query = _build_query(name, qtype, edns_size=edns_size, dnssec=dnssec)
     start = time.perf_counter()
     with socket.create_connection((server, 53), timeout=3) as sock:
@@ -1083,17 +1150,17 @@ def _tcp_query(
             if not chunk:
                 break
             response.extend(chunk)
-    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
     rcode = _parse_rcode(bytes(response))
     tc = _parse_tc(bytes(response))
     return elapsed_ms, rcode, len(response), tc
 
-def _p95(values: list[int]) -> int:
+def _p95(values: list[float]) -> float:
     if not values:
-        return 0
+        return 0.0
     items = sorted(values)
     idx = int((len(items) - 1) * 0.95)
-    return int(items[idx])
+    return float(items[idx])
 
 def _parse_unbound_stats(raw: str) -> dict[str, float]:
     stats: dict[str, float] = {}
@@ -1407,6 +1474,59 @@ def docker_exec_root(container: str, sh_cmd: str, timeout_s: int = 8) -> CmdResp
 def docker_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
     return run_cmd(["docker", *args], timeout_s)
 
+def _cmd_failure(command: str, message: str, exit_code: int = 127) -> CmdResponse:
+    return CmdResponse(
+        ok=False,
+        command=command,
+        exit_code=exit_code,
+        stdout="",
+        stderr=message,
+    )
+
+def _record_runbook_step(
+    steps: list[RunbookStep],
+    label: str,
+    res: CmdResponse,
+    ok_override: Optional[bool] = None,
+) -> bool:
+    ok = res.ok if ok_override is None else ok_override
+    steps.append(
+        RunbookStep(
+            step=label,
+            ok=ok,
+            command=res.command,
+            exit_code=res.exit_code,
+            stdout=res.stdout,
+            stderr=res.stderr,
+        )
+    )
+    return ok
+
+def _matches_any(text: str, patterns: list[str]) -> bool:
+    return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+def _matches_all(text: str, patterns: list[str]) -> bool:
+    return all(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+def _evaluate_output(
+    res: CmdResponse,
+    expect_any: Optional[list[str]] = None,
+    expect_all: Optional[list[str]] = None,
+    forbid_any: Optional[list[str]] = None,
+    allow_nonzero: bool = False,
+) -> bool:
+    text = "\n".join([res.stdout or "", res.stderr or ""])
+    ok = True
+    if not allow_nonzero:
+        ok = ok and res.ok
+    if expect_any:
+        ok = ok and _matches_any(text, expect_any)
+    if expect_all:
+        ok = ok and _matches_all(text, expect_all)
+    if forbid_any:
+        ok = ok and not _matches_any(text, forbid_any)
+    return ok
+
 def ensure_running(container: str) -> CmdResponse:
     inspect = docker_cmd(
         ["inspect", "-f", "{{.State.Running}}", container], timeout_s=6
@@ -1491,13 +1611,13 @@ def _resolver_cpu_pct(container: str) -> Optional[float]:
     except ValueError:
         return None
 
-def _percentile(values: list[int], pct: float) -> int:
+def _percentile(values: list[float], pct: float) -> float:
     if not values:
-        return 0
+        return 0.0
     ordered = sorted(values)
     idx = int(math.ceil(pct * len(ordered))) - 1
     idx = max(0, min(idx, len(ordered) - 1))
-    return ordered[idx]
+    return float(ordered[idx])
 
 def _parse_mem_bytes(value: str) -> Optional[int]:
     raw = value.strip()
@@ -1550,6 +1670,9 @@ def _mail_log_file() -> str:
     if res.exit_code != 0 or not res.stdout.strip():
         raise HTTPException(status_code=404, detail="Mail log not found")
     return res.stdout.strip()
+
+def _doveadm_has_error(stderr_text: str) -> bool:
+    return bool(re.search(r"(?im)^(?:doveadm\\([^)]*\\):\\s*)?(Error|Fatal|Panic):", stderr_text or ""))
 
 def _build_swaks_command(req: EmailSendRequest) -> tuple[str, str]:
     subject = (req.subject or "").strip()
@@ -1625,6 +1748,166 @@ def _maildir_headers(user: str, limit: int) -> CmdResponse:
         "done'"
     ).format(base=base, limit=limit)
     return docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+
+def _maildir_list(user: str, limit: int) -> CmdResponse:
+    if "@" not in user:
+        raise HTTPException(status_code=400, detail="Invalid mailbox user")
+    local, domain = user.split("@", 1)
+    local = local.strip()
+    domain = domain.strip()
+    if not local or not domain:
+        raise HTTPException(status_code=400, detail="Invalid mailbox user")
+    if not NAME_RE.match(domain):
+        raise HTTPException(status_code=400, detail="Invalid mailbox domain")
+    if not MAILBOX_RE.match(local):
+        raise HTTPException(status_code=400, detail="Invalid mailbox user")
+
+    base = f"/var/mail/{domain}/{local}"
+    cmd = (
+        "sh -lc '"
+        "dir={base}; "
+        "files=$(ls -t \"$dir\"/new/* \"$dir\"/cur/* 2>/dev/null | head -n {limit}); "
+        "if [ -z \"$files\" ]; then echo \"No messages found.\"; exit 0; fi; "
+        "for f in $files; do "
+        "rel=${{f#\"$dir\"/}}; "
+        "echo \"FILE: $rel\"; "
+        "sed -n \"1,120p\" \"$f\" | sed -n \"/^$/q; p\" | "
+        "grep -Ei \"^(From|To|Subject|Date|Message-Id):\"; "
+        "echo \"\"; "
+        "done'"
+    ).format(base=base, limit=limit)
+    return docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+
+def _parse_doveadm_message_list(output: str, mailbox: str) -> list[EmailMessageSummary]:
+    messages: list[dict] = []
+    current: dict = {}
+    for raw_line in (output or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            if current.get("id"):
+                messages.append(current)
+            current = {}
+            continue
+        if line.lower().startswith("seq:"):
+            if current.get("id"):
+                messages.append(current)
+            current = {}
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "uid":
+            current["id"] = value
+        elif key == "hdr.subject":
+            current["subject"] = value
+        elif key == "hdr.from":
+            current["from_addr"] = value
+        elif key == "hdr.to":
+            current["to_addr"] = value
+        elif key == "hdr.date":
+            current["date"] = value
+    if current.get("id"):
+        messages.append(current)
+
+    return [
+        EmailMessageSummary(
+            id=str(msg.get("id", "")).strip(),
+            source="uid",
+            mailbox=mailbox,
+            subject=str(msg.get("subject", "")).strip(),
+            from_addr=str(msg.get("from_addr", "")).strip(),
+            to_addr=str(msg.get("to_addr", "")).strip(),
+            date=str(msg.get("date", "")).strip(),
+        )
+        for msg in messages
+        if str(msg.get("id", "")).strip()
+    ]
+
+def _parse_maildir_message_list(output: str, mailbox: str) -> list[EmailMessageSummary]:
+    messages: list[EmailMessageSummary] = []
+    current: Optional[dict] = None
+    for raw_line in (output or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("FILE: "):
+            if current:
+                messages.append(
+                    EmailMessageSummary(
+                        id=current.get("id", ""),
+                        source="file",
+                        mailbox=mailbox,
+                        subject=current.get("subject", ""),
+                        from_addr=current.get("from_addr", ""),
+                        to_addr=current.get("to_addr", ""),
+                        date=current.get("date", ""),
+                    )
+                )
+            current = {
+                "id": line.replace("FILE:", "", 1).strip(),
+                "subject": "",
+                "from_addr": "",
+                "to_addr": "",
+                "date": "",
+            }
+            continue
+        if current is None or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key = key.strip().lower()
+        value = value.strip()
+        if key == "subject":
+            current["subject"] = value
+        elif key == "from":
+            current["from_addr"] = value
+        elif key == "to":
+            current["to_addr"] = value
+        elif key == "date":
+            current["date"] = value
+    if current:
+        messages.append(
+            EmailMessageSummary(
+                id=current.get("id", ""),
+                source="file",
+                mailbox=mailbox,
+                subject=current.get("subject", ""),
+                from_addr=current.get("from_addr", ""),
+                to_addr=current.get("to_addr", ""),
+                date=current.get("date", ""),
+            )
+        )
+    return messages
+
+def _clean_doveadm_text(output: str) -> str:
+    lines = (output or "").splitlines()
+    content: list[str] = []
+    capturing = False
+    for line in lines:
+        if line.startswith("text:") or line.startswith("body:"):
+            capturing = True
+            remainder = line.split(":", 1)[1].lstrip()
+            if remainder:
+                content.append(remainder)
+            continue
+        if line.startswith("seq:") or line.startswith("uid:"):
+            continue
+        if capturing:
+            content.append(line)
+    if not content:
+        content = [line for line in lines if not line.startswith("seq:") and not line.startswith("uid:")]
+    return "\n".join(content).strip()
+
+def _validate_maildir_rel(value: str) -> str:
+    rel = (value or "").strip()
+    if not rel:
+        raise HTTPException(status_code=400, detail="Missing mailbox message id")
+    if ".." in rel or rel.startswith("/") or "\\" in rel:
+        raise HTTPException(status_code=400, detail="Invalid mailbox message id")
+    if not re.match(r"^(?:new|cur)/[A-Za-z0-9._@+=:,%+-]+$", rel):
+        raise HTTPException(status_code=400, detail="Invalid mailbox message id")
+    return rel
 
 @app.get("/health")
 def health():
@@ -1781,7 +2064,7 @@ def availability_probe(
 
     name = validate_name(req.name)
     resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
-    timings: list[int] = []
+    timings: list[float] = []
     rcode_counts: dict[str, int] = {}
 
     for _ in range(req.count):
@@ -1799,11 +2082,12 @@ def availability_probe(
         name=name,
         qtype=req.qtype,
         count=req.count,
-        min_ms=min(timings),
-        max_ms=max(timings),
-        avg_ms=int(sum(timings) / len(timings)),
-        p50_ms=_percentile(timings, 0.50),
-        p95_ms=_percentile(timings, 0.95),
+        min_ms=round(min(timings), 3),
+        max_ms=round(max(timings), 3),
+        avg_ms=round(sum(timings) / len(timings), 3),
+        p50_ms=round(_percentile(timings, 0.50), 3),
+        p95_ms=round(_percentile(timings, 0.95), 3),
+        p99_ms=round(_percentile(timings, 0.99), 3),
         rcode_counts=rcode_counts,
     )
 
@@ -2380,7 +2664,7 @@ def amplification_test(
     results: list[AmplificationResult] = []
     for size in req.edns_sizes:
         for qtype in req.qtypes:
-            total_latency: list[int] = []
+            total_latency: list[float] = []
             udp_sizes: list[int] = []
             tcp_sizes: list[int] = []
             tc_count = 0
@@ -2400,7 +2684,7 @@ def amplification_test(
                     if tc:
                         tc_count += 1
                     tcp_used = False
-                    tcp_ms = 0
+                    tcp_ms = 0.0
                     tcp_size = 0
                     if tc and req.tcp_fallback:
                         tcp_used = True
@@ -2438,8 +2722,8 @@ def amplification_test(
                     rcode_counts=rcode_counts,
                     tc_rate=tc_count / count,
                     tcp_rate=tcp_count / count,
-                    avg_latency_ms=round(avg_latency, 2),
-                    p95_latency_ms=_p95(total_latency),
+                    avg_latency_ms=round(avg_latency, 3),
+                    p95_latency_ms=round(_p95(total_latency), 3),
                     avg_udp_size=round(avg_udp, 2),
                     max_udp_size=max(udp_sizes) if udp_sizes else 0,
                     avg_tcp_size=round(avg_tcp, 2),
@@ -2467,7 +2751,7 @@ def amplification_mix(
     zone = validate_name(req.zone)
     resolver_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
 
-    total_latency: list[int] = []
+    total_latency: list[float] = []
     udp_sizes: list[int] = []
     tcp_sizes: list[int] = []
     tc_count = 0
@@ -2506,7 +2790,7 @@ def amplification_mix(
             if tc:
                 tc_count += 1
             tcp_used = False
-            tcp_ms = 0
+            tcp_ms = 0.0
             tcp_size = 0
             if tc and req.tcp_fallback:
                 tcp_used = True
@@ -2545,8 +2829,8 @@ def amplification_mix(
         query_mix=mix_counts,
         tc_rate=tc_count / count,
         tcp_rate=tcp_count / count,
-        avg_latency_ms=round(avg_latency, 2),
-        p95_latency_ms=_p95(total_latency),
+        avg_latency_ms=round(avg_latency, 3),
+        p95_latency_ms=round(_p95(total_latency), 3),
         avg_udp_size=round(avg_udp, 2),
         max_udp_size=max(udp_sizes) if udp_sizes else 0,
         avg_tcp_size=round(avg_tcp, 2),
@@ -3074,6 +3358,94 @@ def email_send(
         stderr=res.stderr,
     )
 
+@app.post("/email/user/add", response_model=CmdResponse)
+def email_user_add(
+    req: EmailUserAddRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    email = validate_email(req.email)
+    password = (req.password or "").strip()
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="Password too long")
+
+    ensure_running(MAILSERVER_CONTAINER)
+
+    cmd = f"setup email add {shlex.quote(email)} {shlex.quote(password)}"
+    res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=20)
+    redacted_cmd = f"docker exec {MAILSERVER_CONTAINER} sh -lc {shlex.quote(f'setup email add {email} ****')}"
+    if request:
+        audit_log(request, "email_user_add", {"ok": res.ok, "email": email})
+    return CmdResponse(
+        ok=res.ok,
+        command=redacted_cmd,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.post("/email/user/update", response_model=CmdResponse)
+def email_user_update(
+    req: EmailUserUpdateRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    email = validate_email(req.email)
+    password = (req.password or "").strip()
+    if len(password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    if len(password) > 128:
+        raise HTTPException(status_code=400, detail="Password too long")
+
+    ensure_running(MAILSERVER_CONTAINER)
+
+    cmd = f"setup email update {shlex.quote(email)} {shlex.quote(password)}"
+    res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=20)
+    redacted_cmd = f"docker exec {MAILSERVER_CONTAINER} sh -lc {shlex.quote(f'setup email update {email} ****')}"
+    if request:
+        audit_log(request, "email_user_update", {"ok": res.ok, "email": email})
+    return CmdResponse(
+        ok=res.ok,
+        command=redacted_cmd,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.post("/email/user/delete", response_model=CmdResponse)
+def email_user_delete(
+    req: EmailUserDeleteRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    email = validate_email(req.email)
+
+    ensure_running(MAILSERVER_CONTAINER)
+
+    cmd = f"setup email del {shlex.quote(email)}"
+    res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=20)
+    redacted_cmd = f"docker exec {MAILSERVER_CONTAINER} sh -lc {shlex.quote(f'setup email del {email}')}"
+    if request:
+        audit_log(request, "email_user_delete", {"ok": res.ok, "email": email})
+    return CmdResponse(
+        ok=res.ok,
+        command=redacted_cmd,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
 @app.get("/email/logs", response_model=EmailLogResponse)
 def email_logs(
     tail: int = 200,
@@ -3125,7 +3497,12 @@ def email_imap_check(
     ensure_running(MAILSERVER_CONTAINER)
     fields = "hdr.subject hdr.from hdr.to hdr.date"
     cmd = (
-        "doveadm fetch -u {user} '{fields}' mailbox {mailbox} all | tail -n {limit}"
+        "tmp=$(mktemp); "
+        "doveadm fetch -u {user} '{fields}' mailbox {mailbox} all > \"$tmp\"; "
+        "status=$?; "
+        "tail -n {limit} \"$tmp\"; "
+        "rm -f \"$tmp\"; "
+        "exit $status"
     ).format(
         user=shlex.quote(user),
         fields=fields,
@@ -3133,8 +3510,10 @@ def email_imap_check(
         limit=limit,
     )
     res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
-    if not res.ok:
-        # Fallback for missing dovecot index files or empty mailbox metadata.
+    # Fallback for missing dovecot index files or empty mailbox metadata.
+    # doveadm can emit errors on stderr while still returning exit code 0.
+    has_error = _doveadm_has_error(res.stderr or "")
+    if not res.ok or has_error:
         res = _maildir_headers(user, limit)
     if request:
         audit_log(
@@ -3148,6 +3527,116 @@ def email_imap_check(
         exit_code=res.exit_code,
         stdout=res.stdout,
         stderr=res.stderr,
+    )
+
+@app.post("/email/inbox/list", response_model=EmailMessageListResponse)
+def email_inbox_list(
+    req: EmailMessageListRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    user = validate_email(req.user)
+    mailbox = validate_mailbox(req.mailbox)
+    limit = max(1, min(req.limit, MAX_IMAP_LINES))
+
+    ensure_running(MAILSERVER_CONTAINER)
+    fields = "uid hdr.subject hdr.from hdr.to hdr.date"
+    cmd = "doveadm fetch -u {user} '{fields}' mailbox {mailbox} all".format(
+        user=shlex.quote(user),
+        fields=fields,
+        mailbox=shlex.quote(mailbox),
+    )
+    res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+    has_error = _doveadm_has_error(res.stderr or "")
+    if not res.ok or has_error:
+        res = _maildir_list(user, limit)
+        messages = _parse_maildir_message_list(res.stdout, mailbox)
+    else:
+        messages = _parse_doveadm_message_list(res.stdout, mailbox)
+
+    if len(messages) > limit:
+        messages = messages[-limit:]
+
+    if request:
+        audit_log(
+            request,
+            "email_inbox_list",
+            {"ok": res.ok, "user": user, "mailbox": mailbox, "limit": limit},
+        )
+    return EmailMessageListResponse(
+        ok=res.ok,
+        mailbox=mailbox,
+        messages=messages,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+    )
+
+@app.post("/email/inbox/view", response_model=EmailMessageViewResponse)
+def email_inbox_view(
+    req: EmailMessageViewRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    user = validate_email(req.user)
+    mailbox = validate_mailbox(req.mailbox)
+    message_id = (req.message_id or "").strip()
+    source = req.source or "uid"
+    max_lines = max(20, min(req.max_lines, MAX_IMAP_LINES))
+
+    ensure_running(MAILSERVER_CONTAINER)
+    if source == "file":
+        rel = _validate_maildir_rel(message_id)
+        local, domain = user.split("@", 1)
+        base = f"/var/mail/{domain}/{local}"
+        cmd = "sed -n '1,{limit}p' {path}".format(
+            limit=max_lines,
+            path=shlex.quote(f"{base}/{rel}"),
+        )
+        res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+        content = (res.stdout or "").rstrip()
+    else:
+        if not re.match(r"^\\d+$", message_id):
+            raise HTTPException(status_code=400, detail="Invalid message id")
+        cmd = "doveadm fetch -u {user} 'text' mailbox {mailbox} uid {uid}".format(
+            user=shlex.quote(user),
+            mailbox=shlex.quote(mailbox),
+            uid=shlex.quote(message_id),
+        )
+        res = docker_exec_root(MAILSERVER_CONTAINER, cmd, timeout_s=12)
+        if _doveadm_has_error(res.stderr or ""):
+            res = CmdResponse(
+                ok=False,
+                command=res.command,
+                exit_code=res.exit_code,
+                stdout=res.stdout,
+                stderr=res.stderr,
+            )
+        content = _clean_doveadm_text(res.stdout)
+
+    if request:
+        audit_log(
+            request,
+            "email_inbox_view",
+            {"ok": res.ok, "user": user, "mailbox": mailbox, "source": source},
+        )
+    return EmailMessageViewResponse(
+        ok=res.ok,
+        mailbox=mailbox,
+        message_id=message_id,
+        source=source,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
+        content=content,
     )
 
 @app.get("/capture/summary", response_model=CaptureSummaryResponse)
@@ -3289,3 +3778,479 @@ def signing_switch(
     if request:
         audit_log(request, "signing_switch", {"mode": req.mode, "ok": ok})
     return SigningSwitchResponse(ok=ok, mode=req.mode, steps=steps)
+
+@app.post("/runbook/topology", response_model=RunbookResponse)
+def runbook_topology(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    steps: list[RunbookStep] = []
+    list_res = docker_cmd(["network", "ls"])
+    _record_runbook_step(steps, "list docker networks", list_res)
+
+    names_res = docker_cmd(["network", "ls", "--format", "{{.Name}}"])
+    network_names = (
+        [line.strip() for line in names_res.stdout.splitlines() if line.strip()]
+        if names_res.ok
+        else []
+    )
+    network_suffixes = ["client_net", "untrusted_net", "dns_core", "mgmt_net", "public_net"]
+
+    for suffix in network_suffixes:
+        name = next(
+            (
+                candidate
+                for candidate in network_names
+                if candidate == suffix or candidate.endswith(f"_{suffix}")
+            ),
+            None,
+        )
+        inspect_name = name or suffix
+        res = docker_cmd(["network", "inspect", inspect_name])
+        if not res.ok and not name:
+            res = _cmd_failure(
+                f"docker network inspect {inspect_name}",
+                f"Network not found for suffix: {suffix}",
+            )
+        _record_runbook_step(steps, f"inspect network {inspect_name}", res)
+
+    ip_format = (
+        "{{.Name}} {{range $k,$v := .NetworkSettings.Networks}}"
+        "| {{$k}}={{$v.IPAddress}} {{end}}"
+    )
+    containers = [
+        RESOLVER_CONTAINER,
+        RESOLVER_PLAIN_CONTAINER,
+        SIGNING_PARENT_CONTAINER,
+        SIGNING_CHILD_CONTAINER,
+        CLIENT_TRUSTED_CONTAINER,
+        CLIENT_UNTRUSTED_CONTAINER,
+        CLIENT_MGMT_CONTAINER,
+        TOOLBOX_CONTAINER,
+    ]
+    for container in containers:
+        res = docker_cmd(["inspect", "-f", ip_format, container])
+        _record_runbook_step(steps, f"container IPs: {container}", res)
+
+    ok = all(step.ok for step in steps)
+    if request:
+        audit_log(request, "runbook_topology", {"ok": ok})
+    return RunbookResponse(ok=ok, runbook="topology", steps=steps)
+
+@app.post("/runbook/smoke", response_model=RunbookResponse)
+def runbook_smoke(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    steps: list[RunbookStep] = []
+    ok = True
+
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure trusted client running",
+        ensure_running(CLIENT_TRUSTED_CONTAINER),
+    )
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure untrusted client running",
+        ensure_running(CLIENT_UNTRUSTED_CONTAINER),
+    )
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure toolbox running",
+        ensure_running(TOOLBOX_CONTAINER),
+    )
+
+    if not ok:
+        if request:
+            audit_log(request, "runbook_smoke", {"ok": False})
+        return RunbookResponse(ok=False, runbook="smoke", steps=steps)
+
+    trusted_resolver = RESOLVER_BY_PROFILE["valid"]["trusted"]
+    untrusted_resolver = RESOLVER_BY_PROFILE["valid"]["untrusted"]
+    plain_resolver = RESOLVER_BY_PROFILE["plain"]["trusted"]
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} example.test A",
+    )
+    passed = _evaluate_output(res, expect_any=[r"status:\s*NOERROR"])
+    _record_runbook_step(steps, "trusted recursion works", res, passed)
+
+    res = docker_exec(
+        CLIENT_UNTRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{untrusted_resolver} example.test A",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_any=[
+            r"status:\s*REFUSED",
+            r"connection timed out",
+            r"no servers could be reached",
+            r"recursion requested but not available",
+        ],
+        allow_nonzero=True,
+    )
+    _record_runbook_step(steps, "untrusted recursion is blocked", res, passed)
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{AUTH_PARENT_IP} test SOA",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_any=[r"connection timed out", r"no servers could be reached"],
+        allow_nonzero=True,
+    )
+    _record_runbook_step(steps, "client cannot reach parent authoritative", res, passed)
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{AUTH_CHILD_IP} example.test SOA",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_any=[r"connection timed out", r"no servers could be reached"],
+        allow_nonzero=True,
+    )
+    _record_runbook_step(steps, "client cannot reach child authoritative", res, passed)
+
+    res = docker_exec(
+        TOOLBOX_CONTAINER,
+        f"dig +time=1 +tries=1 @{AUTH_PARENT_IP} test SOA",
+    )
+    passed = _evaluate_output(res, expect_any=[r"status:\s*NOERROR"])
+    _record_runbook_step(steps, "toolbox can reach parent authoritative", res, passed)
+
+    res = docker_exec(
+        TOOLBOX_CONTAINER,
+        f"dig +time=1 +tries=1 @{AUTH_CHILD_IP} example.test SOA",
+    )
+    passed = _evaluate_output(res, expect_any=[r"status:\s*NOERROR"])
+    _record_runbook_step(steps, "toolbox can reach child authoritative", res, passed)
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} example.test A +dnssec",
+    )
+    passed = _evaluate_output(res, expect_all=[r"flags:.*\bad\b"])
+    _record_runbook_step(steps, "DNSSEC validation sets AD flag", res, passed)
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{plain_resolver} example.test A +dnssec",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_all=[r"status:\s*NOERROR"],
+        forbid_any=[r"flags:.*\bad\b"],
+    )
+    _record_runbook_step(steps, "plain resolver does not set AD flag", res, passed)
+
+    res = docker_exec(
+        TOOLBOX_CONTAINER,
+        f"dig +time=1 +tries=1 @{AUTH_CHILD_IP} nope1.example.test A +dnssec +multi",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_all=[r"status:\s*NXDOMAIN"],
+        expect_any=[r"\bNSEC3\b", r"\bNSEC\b"],
+    )
+    _record_runbook_step(steps, "NSEC/NSEC3 proof from child", res, passed)
+
+    ok = all(step.ok for step in steps)
+    if request:
+        audit_log(request, "runbook_smoke", {"ok": ok})
+    return RunbookResponse(ok=ok, runbook="smoke", steps=steps)
+
+@app.post("/runbook/capture", response_model=RunbookResponse)
+def runbook_capture(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+    ensure_capture_dir()
+
+    steps: list[RunbookStep] = []
+    ok = True
+
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure trusted client running",
+        ensure_running(CLIENT_TRUSTED_CONTAINER),
+    )
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure toolbox running",
+        ensure_running(TOOLBOX_CONTAINER),
+    )
+
+    if not ok:
+        if request:
+            audit_log(request, "runbook_capture", {"ok": False})
+        return RunbookResponse(ok=False, runbook="capture", steps=steps)
+
+    def record_capture_idle(target: Literal["resolver", "authoritative"]) -> bool:
+        try:
+            running = capture_running(target)
+        except HTTPException as exc:
+            res = _cmd_failure(f"capture check {target}", str(exc.detail))
+            _record_runbook_step(steps, f"check {target} capture idle", res, False)
+            return False
+        if running:
+            res = _cmd_failure(f"capture check {target}", "capture already running")
+            _record_runbook_step(steps, f"check {target} capture idle", res, False)
+            return False
+        res = CmdResponse(
+            ok=True,
+            command=f"capture check {target}",
+            exit_code=0,
+            stdout="idle",
+            stderr="",
+        )
+        _record_runbook_step(steps, f"check {target} capture idle", res, True)
+        return True
+
+    resolver_idle = record_capture_idle("resolver")
+    authoritative_idle = record_capture_idle("authoritative")
+    if not (resolver_idle and authoritative_idle):
+        if request:
+            audit_log(request, "runbook_capture", {"ok": False})
+        return RunbookResponse(ok=False, runbook="capture", steps=steps)
+
+    def start_capture(target: Literal["resolver", "authoritative"]) -> Optional[str]:
+        container = CAPTURE_TARGETS[target]
+        check_tcpdump = docker_exec_root(
+            container, "command -v tcpdump >/dev/null 2>&1"
+        )
+        if not _record_runbook_step(
+            steps, f"check tcpdump in {target}", check_tcpdump
+        ):
+            return None
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        filename = f"{target}-{ts}.pcap"
+        filter_expr = CAPTURE_FILTERS["dns"]
+        iface = "any"
+        base_cmd = f"tcpdump -i {iface} -s 0 -U -w /captures/{filename}"
+        if filter_expr:
+            base_cmd = f"{base_cmd} {filter_expr}"
+        pid_path = capture_pid_file(target)
+        file_path = capture_file_file(target)
+        log_path = capture_log_file(target)
+        sh_cmd = (
+            f"nohup {base_cmd} >{log_path} 2>&1 & "
+            f"echo $! > {pid_path}; "
+            f"echo {filename} > {file_path}"
+        )
+        res = docker_exec_root(container, sh_cmd)
+        if not _record_runbook_step(steps, f"start {target} capture", res):
+            return None
+        return filename
+
+    def stop_capture(
+        target: Literal["resolver", "authoritative"], label: str
+    ) -> Optional[str]:
+        container = CAPTURE_TARGETS[target]
+        pid_path = capture_pid_file(target)
+        file_path = capture_file_file(target)
+        sh_cmd = (
+            f"if [ ! -f {pid_path} ]; then exit 2; fi; "
+            f"pid=$(cat {pid_path}); "
+            f"file=$(cat {file_path} 2>/dev/null || true); "
+            f"kill -2 $pid >/dev/null 2>&1 || true; "
+            "sleep 2; "
+            f"rm -f {pid_path}; "
+            "echo $file"
+        )
+        res = docker_exec_root(container, sh_cmd, timeout_s=12)
+        if res.exit_code == 2:
+            res = _cmd_failure(f"stop {target} capture", "No running capture")
+        _record_runbook_step(steps, label, res)
+        filename = res.stdout.strip() if res.ok else ""
+        return filename or None
+
+    resolver_file = start_capture("resolver")
+    authoritative_file = start_capture("authoritative")
+
+    if not resolver_file or not authoritative_file:
+        if resolver_file:
+            stop_capture("resolver", "stop resolver capture (cleanup)")
+        if authoritative_file:
+            stop_capture("authoritative", "stop authoritative capture (cleanup)")
+        ok = False
+        if request:
+            audit_log(request, "runbook_capture", {"ok": False})
+        return RunbookResponse(ok=False, runbook="capture", steps=steps)
+
+    trusted_resolver = RESOLVER_BY_PROFILE["valid"]["trusted"]
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} example.test A",
+    )
+    passed = _evaluate_output(res, expect_any=[r"status:\s*NOERROR"])
+    _record_runbook_step(steps, "generate traffic (trusted query)", res, passed)
+
+    resolver_file = stop_capture("resolver", "stop resolver capture")
+    authoritative_file = stop_capture("authoritative", "stop authoritative capture")
+
+    if resolver_file:
+        preview = docker_exec_root(
+            CAPTURE_TARGETS["resolver"],
+            f"tcpdump -nn -r /captures/{resolver_file} port 53 -c 25 2>/dev/null",
+            timeout_s=15,
+        )
+        _record_runbook_step(
+            steps, f"preview resolver capture ({resolver_file})", preview
+        )
+    if authoritative_file:
+        preview = docker_exec_root(
+            CAPTURE_TARGETS["authoritative"],
+            f"tcpdump -nn -r /captures/{authoritative_file} port 53 -c 25 2>/dev/null",
+            timeout_s=15,
+        )
+        _record_runbook_step(
+            steps, f"preview authoritative capture ({authoritative_file})", preview
+        )
+
+    ok = all(step.ok for step in steps)
+    if request:
+        audit_log(request, "runbook_capture", {"ok": ok})
+    return RunbookResponse(ok=ok, runbook="capture", steps=steps)
+
+@app.post("/runbook/verify", response_model=RunbookResponse)
+def runbook_verify(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    steps: list[RunbookStep] = []
+    ok = True
+
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure trusted client running",
+        ensure_running(CLIENT_TRUSTED_CONTAINER),
+    )
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure toolbox running",
+        ensure_running(TOOLBOX_CONTAINER),
+    )
+
+    if not ok:
+        if request:
+            audit_log(request, "runbook_verify", {"ok": False})
+        return RunbookResponse(ok=False, runbook="verify", steps=steps)
+
+    res = docker_exec(
+        TOOLBOX_CONTAINER,
+        f"dig +time=1 +tries=1 @{AUTH_PARENT_IP} example.test DS +dnssec +multi",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_all=[r"status:\s*NOERROR"],
+        expect_any=[r"\bDS\b"],
+    )
+    _record_runbook_step(steps, "parent DS record present", res, passed)
+
+    trusted_resolver = RESOLVER_BY_PROFILE["valid"]["trusted"]
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} example.test A +dnssec",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_all=[r"status:\s*NOERROR", r"flags:.*\bad\b"],
+    )
+    _record_runbook_step(steps, "resolver validates example.test", res, passed)
+
+    ok = all(step.ok for step in steps)
+    if request:
+        audit_log(request, "runbook_verify", {"ok": ok})
+    return RunbookResponse(ok=ok, runbook="verify", steps=steps)
+
+@app.post("/runbook/mail", response_model=RunbookResponse)
+def runbook_mail(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    steps: list[RunbookStep] = []
+    ok = True
+
+    ok = ok and _record_runbook_step(
+        steps,
+        "ensure trusted client running",
+        ensure_running(CLIENT_TRUSTED_CONTAINER),
+    )
+
+    if not ok:
+        if request:
+            audit_log(request, "runbook_mail", {"ok": False})
+        return RunbookResponse(ok=False, runbook="mail", steps=steps)
+
+    trusted_resolver = RESOLVER_BY_PROFILE["valid"]["trusted"]
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} example.test MX",
+    )
+    passed = _evaluate_output(
+        res,
+        expect_all=[r"status:\s*NOERROR"],
+        expect_any=[r"\bMX\b", r"mail\.example\.test"],
+    )
+    _record_runbook_step(steps, "MX record present", res, passed)
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} example.test TXT",
+    )
+    passed = _evaluate_output(res, expect_any=[r"v=spf1"])
+    _record_runbook_step(steps, "SPF record present", res, passed)
+
+    res = docker_exec(
+        CLIENT_TRUSTED_CONTAINER,
+        f"dig +time=1 +tries=1 @{trusted_resolver} mail._domainkey.example.test TXT",
+    )
+    passed = _evaluate_output(res, expect_any=[r"DKIM1", r"v=DKIM1"])
+    _record_runbook_step(steps, "DKIM record present", res, passed)
+
+    ok = all(step.ok for step in steps)
+    if request:
+        audit_log(request, "runbook_mail", {"ok": ok})
+    return RunbookResponse(ok=ok, runbook="mail", steps=steps)
+
+@app.post("/runbook/dnssec", response_model=RunbookResponse)
+def runbook_dnssec(
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    steps: list[RunbookStep] = []
+    res = docker_cmd(["start", "-a", DS_RECOMPUTE_CONTAINER], timeout_s=180)
+    _record_runbook_step(steps, "run ds_recompute", res)
+
+    res = docker_cmd(["start", "-a", ANCHOR_EXPORT_CONTAINER], timeout_s=180)
+    _record_runbook_step(steps, "run anchor_export", res)
+
+    res = docker_cmd(["restart", RESOLVER_CONTAINER], timeout_s=20)
+    _record_runbook_step(steps, "restart resolver", res)
+
+    ok = all(step.ok for step in steps)
+    if request:
+        audit_log(request, "runbook_dnssec", {"ok": ok})
+    return RunbookResponse(ok=ok, runbook="dnssec", steps=steps)

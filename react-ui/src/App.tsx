@@ -9,18 +9,22 @@ type SectionId =
   | 'all'
   | 'overview'
   | 'topology'
+  | 'runbook'
   | 'dig'
   | 'output'
   | 'dnssec'
   | 'privacy'
   | 'email'
   | 'availability'
+  | 'scenarios'
   | 'perf'
   | 'limits'
   | 'amplification'
   | 'controls'
   | 'configs'
   | 'capture';
+
+type RunbookId = 'topology' | 'smoke' | 'capture' | 'verify' | 'mail' | 'dnssec';
 
 type DigRequest = {
   client: Client;
@@ -59,6 +63,93 @@ type OutputView = {
   ok: boolean;
   command: string;
   text: string;
+};
+
+type RunbookStep = {
+  step: string;
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
+type RunbookResponse = {
+  ok: boolean;
+  runbook: RunbookId;
+  steps: RunbookStep[];
+};
+
+type HealthResponse = {
+  ok: boolean;
+  profile?: string;
+  default_dns_server?: string;
+};
+
+type AgentStatusCheck = {
+  name: string;
+  ok: boolean;
+  latency_ms?: number;
+  detail?: string;
+};
+
+type AgentStatusPayload = {
+  role?: string;
+  checks?: AgentStatusCheck[];
+};
+
+type AgentStatusResponse = {
+  ok: boolean;
+  agents: Record<string, AgentStatusPayload>;
+};
+
+type TopologyHealth = {
+  health: NodeHealth;
+  detail?: string;
+};
+
+type ScenarioId = 'S1' | 'S2' | 'S3' | 'S4' | 'S5' | 'S6';
+
+type ScenarioPerfRow = {
+  availabilityPct: string;
+  avgLatency: string;
+  p50: string;
+  p95: string;
+  p99: string;
+  qpsMax: string;
+  baselineQps: string;
+  errorRate: string;
+  cacheHit: string;
+  nxdomain: string;
+  servfail: string;
+  upstreamQps: string;
+  notes: string;
+};
+
+type ScenarioResourceRow = {
+  cpu: string;
+  ram: string;
+  memPct: string;
+  ratelimitedPct: string;
+  upstreamQps: string;
+  amplificationUdp: string;
+  amplificationTcp: string;
+  avgUdpSize: string;
+  avgTcpSize: string;
+  tcRate: string;
+  tcpRate: string;
+  notes: string;
+};
+
+type ScenarioSecurityRow = {
+  dnssecOkPct: string;
+  bogusPct: string;
+  dotSuccessPct: string;
+  dohSuccessPct: string;
+  certErrorsPct: string;
+  qnameMin: string;
+  ecsLeakage: string;
+  notes: string;
 };
 
 type ConfigGroup = 'authoritative' | 'resolver';
@@ -197,6 +288,14 @@ type EmailSendResponse = {
   stderr: string;
 };
 
+type EmailUserResponse = {
+  ok: boolean;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
 type EmailLogResponse = {
   ok: boolean;
   file: string;
@@ -206,12 +305,36 @@ type EmailLogResponse = {
   stderr: string;
 };
 
-type EmailImapResponse = {
+type EmailMessageSummary = {
+  id: string;
+  source: 'uid' | 'file';
+  mailbox: string;
+  subject: string;
+  from_addr: string;
+  to_addr: string;
+  date: string;
+};
+
+type EmailMessageListResponse = {
   ok: boolean;
+  mailbox: string;
+  messages: EmailMessageSummary[];
   command: string;
   exit_code: number;
   stdout: string;
   stderr: string;
+};
+
+type EmailMessageViewResponse = {
+  ok: boolean;
+  mailbox: string;
+  message_id: string;
+  source: 'uid' | 'file';
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+  content: string;
 };
 
 type AvailabilityMetricsResponse = {
@@ -255,6 +378,7 @@ type AvailabilityProbeResponse = {
   avg_ms: number;
   p50_ms?: number;
   p95_ms?: number;
+  p99_ms?: number;
   rcode_counts: Record<string, number>;
 };
 
@@ -275,11 +399,15 @@ type BaselineSummary = {
   cache_hit_ratio: number;
   nxdomain_ratio: number;
   servfail_ratio: number;
+  availability_ratio?: number;
+  avg_ms?: number;
   p50_ms: number;
   p95_ms: number;
+  p99_ms?: number;
   cpu_pct?: number;
   mem_mb?: number;
   mem_pct?: number;
+  ratelimited_ratio?: number;
   upstream_qps?: number;
   upstream_queries?: number;
   capture_file?: string;
@@ -643,6 +771,107 @@ const TOPOLOGY_NODES: NodeInfo[] = [
   },
 ];
 
+const SCENARIOS: { id: ScenarioId; label: string; note: string; detail: string }[] = [
+  {
+    id: 'S1',
+    label: 'S1 Baseline (no DNSSEC)',
+    note: 'punkt odniesienia',
+    detail: 'Plain resolver, DNSSEC off in queries.',
+  },
+  {
+    id: 'S2',
+    label: 'S2 DNSSEC validating',
+    note: 'integralność odpowiedzi',
+    detail: 'Validating resolver with DNSSEC enabled.',
+  },
+  {
+    id: 'S3',
+    label: 'S3 Aggressive NSEC',
+    note: 'mniej zapytań do auth przy NXDOMAIN',
+    detail: 'Aggressive NSEC enabled; run NXDOMAIN proof.',
+  },
+  {
+    id: 'S4',
+    label: 'S4 NSEC3',
+    note: 'ochrona przed enumeracją',
+    detail: 'Switch signing to NSEC3 (offline).',
+  },
+  {
+    id: 'S5',
+    label: 'S5 DoT/DoH',
+    note: 'prywatność kosztem narzutu',
+    detail: 'Measure DoT/DoH overhead using privacy checks.',
+  },
+  {
+    id: 'S6',
+    label: 'S6 Limits + anti-amplification',
+    note: 'stabilność w warunkach ataku',
+    detail: 'Enable RRL and rate limits before load/amp tests.',
+  },
+];
+
+const DEFAULT_PERF_TABLE: Record<ScenarioId, ScenarioPerfRow> = SCENARIOS.reduce(
+  (acc, scenario) => {
+    acc[scenario.id] = {
+      availabilityPct: '',
+      avgLatency: '',
+      p50: '',
+      p95: '',
+      p99: '',
+      qpsMax: '',
+      baselineQps: '',
+      errorRate: '',
+      cacheHit: '',
+      nxdomain: '',
+      servfail: '',
+      upstreamQps: '',
+      notes: scenario.note,
+    };
+    return acc;
+  },
+  {} as Record<ScenarioId, ScenarioPerfRow>
+);
+
+const DEFAULT_RESOURCE_TABLE: Record<ScenarioId, ScenarioResourceRow> =
+  SCENARIOS.reduce(
+    (acc, scenario) => {
+      acc[scenario.id] = {
+        cpu: '',
+        ram: '',
+        memPct: '',
+        ratelimitedPct: '',
+        upstreamQps: '',
+        amplificationUdp: '',
+        amplificationTcp: '',
+        avgUdpSize: '',
+        avgTcpSize: '',
+        tcRate: '',
+        tcpRate: '',
+        notes: scenario.note,
+      };
+      return acc;
+    },
+    {} as Record<ScenarioId, ScenarioResourceRow>
+  );
+
+const DEFAULT_SECURITY_TABLE: Record<ScenarioId, ScenarioSecurityRow> =
+  SCENARIOS.reduce(
+    (acc, scenario) => {
+      acc[scenario.id] = {
+        dnssecOkPct: '',
+        bogusPct: '',
+        dotSuccessPct: '',
+        dohSuccessPct: '',
+        certErrorsPct: '',
+        qnameMin: '',
+        ecsLeakage: '',
+        notes: scenario.note,
+      };
+      return acc;
+    },
+    {} as Record<ScenarioId, ScenarioSecurityRow>
+  );
+
 const MVP_UI_NOTES = [
   {
     title: 'Nodes / Topology',
@@ -669,12 +898,14 @@ const SECTION_TABS: { id: SectionId; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'overview', label: 'Overview' },
   { id: 'topology', label: 'Topology' },
+  { id: 'runbook', label: 'Runbook' },
   { id: 'dig', label: 'Dig' },
   { id: 'output', label: 'Output' },
   { id: 'dnssec', label: 'DNSSEC' },
   { id: 'privacy', label: 'Privacy' },
   { id: 'email', label: 'Email' },
   { id: 'availability', label: 'Availability' },
+  { id: 'scenarios', label: 'Scenarios' },
   { id: 'perf', label: 'Perf' },
   { id: 'limits', label: 'Service Limits' },
   { id: 'amplification', label: 'Amplification' },
@@ -682,6 +913,48 @@ const SECTION_TABS: { id: SectionId; label: string }[] = [
   { id: 'configs', label: 'Configs' },
   { id: 'capture', label: 'Capture' },
 ];
+
+const RUNBOOKS: { id: RunbookId; title: string; desc: string; note?: string }[] = [
+  {
+    id: 'topology',
+    title: 'Topology snapshot',
+    desc: 'Runs docker network listing, network inspect, and container IP mapping.',
+  },
+  {
+    id: 'smoke',
+    title: 'DNS behavior smoke tests',
+    desc: 'Runs the manual.md recursion, segmentation, and DNSSEC checks.',
+    note: 'Uses the trusted/untrusted client containers and the toolbox.',
+  },
+  {
+    id: 'capture',
+    title: 'Traffic capture snapshot',
+    desc: 'Starts resolver + authoritative capture, runs a query, then previews the PCAPs.',
+    note: 'From manual.md section 2 (live traffic capture).',
+  },
+  {
+    id: 'verify',
+    title: 'DNSSEC verification checks',
+    desc: 'Checks DS in the parent and validates answers via the resolver.',
+    note: 'From dns.md verification checks.',
+  },
+  {
+    id: 'mail',
+    title: 'Mail DNS records',
+    desc: 'Queries MX/SPF/DKIM records for example.test via the resolver.',
+    note: 'From dns.md mail DNS records section.',
+  },
+  {
+    id: 'dnssec',
+    title: 'DNSSEC maintenance',
+    desc: 'Runs DS recompute, trust-anchor export, and restarts the resolver.',
+    note: 'Matches dns.md manual maintenance steps.',
+  },
+];
+
+const DEFAULT_RUNBOOK_QUEUE: RunbookId[] = ['capture', 'verify', 'mail'];
+const RUNBOOK_VISIBILITY_KEY = 'runbookVisibility';
+const SHOW_RUNBOOK_QUEUE = false;
 
 const API_BASE = (import.meta.env.VITE_API_BASE || '/api').replace(/\/+$/, '');
 const LAB_API_BASE = (import.meta.env.VITE_LAB_API_BASE || '/lab-api').replace(
@@ -748,6 +1021,23 @@ function formatPercent(value?: number): string {
     return 'n/a';
   }
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatPercentValue(value?: number): string {
+  if (value === undefined || Number.isNaN(value)) {
+    return '';
+  }
+  const abs = Math.abs(value);
+  if (abs >= 10) {
+    return value.toFixed(1);
+  }
+  if (abs >= 1) {
+    return value.toFixed(2);
+  }
+  if (abs >= 0.1) {
+    return value.toFixed(3);
+  }
+  return value.toFixed(4);
 }
 
 function formatKeyValues(values: Record<string, number> | undefined): string {
@@ -826,13 +1116,6 @@ function formatStatusLabel(rcode?: string, ad?: boolean): string {
   return `${rcode}${ad === undefined ? '' : ` (AD=${ad ? 'yes' : 'no'})`}`;
 }
 
-function formatDemoStatus(rcode?: string, ad?: boolean): string {
-  if (rcode === 'NXDOMAIN') {
-    return 'NXDOMAIN (expected)';
-  }
-  return formatStatusLabel(rcode, ad);
-}
-
 function formatIndicator(value?: boolean): string {
   if (value === undefined) {
     return 'unknown';
@@ -883,7 +1166,7 @@ function healthClass(health: NodeHealth): string {
 function healthLabel(health: NodeHealth): string {
   if (health === 'up') return 'Up';
   if (health === 'down') return 'Down';
-  return 'Unknown';
+  return 'Not checked';
 }
 
 function parseNsec3FromZone(content: string, sourceLabel: string) {
@@ -1034,25 +1317,83 @@ export default function App() {
   const [signingStatus, setSigningStatus] = useState('');
   const [signingOutput, setSigningOutput] = useState('');
   const [signingSteps, setSigningSteps] = useState<SigningStep[]>([]);
+  const [runbookBusy, setRunbookBusy] = useState(false);
+  const [runbookStatus, setRunbookStatus] = useState('');
+  const [runbookResults, setRunbookResults] = useState<
+    Record<RunbookId, RunbookResponse | null>
+  >({
+    topology: null,
+    smoke: null,
+    capture: null,
+    verify: null,
+    mail: null,
+    dnssec: null,
+  });
+  const [runbookHidden, setRunbookHidden] = useState<
+    Record<RunbookId, boolean>
+  >(() => {
+    if (typeof window === 'undefined') {
+      return {
+        topology: false,
+        smoke: false,
+        capture: false,
+        verify: false,
+        mail: false,
+        dnssec: false,
+      };
+    }
+    try {
+      const stored = window.localStorage.getItem(RUNBOOK_VISIBILITY_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<Record<RunbookId, boolean>>;
+        return {
+          topology: Boolean(parsed.topology),
+          smoke: Boolean(parsed.smoke),
+          capture: Boolean(parsed.capture),
+          verify: Boolean(parsed.verify),
+          mail: Boolean(parsed.mail),
+          dnssec: Boolean(parsed.dnssec),
+        };
+      }
+    } catch {
+      // Ignore local storage errors.
+    }
+    return {
+      topology: false,
+      smoke: false,
+      capture: false,
+      verify: false,
+      mail: false,
+      dnssec: false,
+    };
+  });
+  const [runbookQueue, setRunbookQueue] =
+    useState<RunbookId[]>(DEFAULT_RUNBOOK_QUEUE);
   const [proofBusy, setProofBusy] = useState(false);
   const [proofStatus, setProofStatus] = useState('');
   const [proofOutput, setProofOutput] = useState('');
   const [proofCaptureFile, setProofCaptureFile] = useState('');
-  const [proofColdCache, setProofColdCache] = useState(true);
-  const [proofFlushCache, setProofFlushCache] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [privacyStatus, setPrivacyStatus] = useState('');
   const [privacyOutput, setPrivacyOutput] = useState('');
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailStatus, setEmailStatus] = useState('');
+  const [emailUserAddress, setEmailUserAddress] = useState('user@example.test');
+  const [emailUserPassword, setEmailUserPassword] = useState('');
+  const [emailUserOutput, setEmailUserOutput] = useState('');
   const [emailOutput, setEmailOutput] = useState('');
   const [emailLog, setEmailLog] = useState('');
   const [emailLogFile, setEmailLogFile] = useState('');
   const [emailLogTail, setEmailLogTail] = useState(200);
   const [emailLogFilter, setEmailLogFilter] = useState('dkim');
+  const [emailImapUser, setEmailImapUser] = useState('user@example.test');
   const [emailImapMailbox, setEmailImapMailbox] = useState('INBOX');
   const [emailImapLimit, setEmailImapLimit] = useState(40);
-  const [emailImapOutput, setEmailImapOutput] = useState('');
+  const [emailInboxMessages, setEmailInboxMessages] = useState<EmailMessageSummary[]>([]);
+  const [emailInboxSelected, setEmailInboxSelected] =
+    useState<EmailMessageSummary | null>(null);
+  const [emailInboxContent, setEmailInboxContent] = useState('');
+  const [emailInboxRaw, setEmailInboxRaw] = useState('');
   const [emailFrom, setEmailFrom] = useState('user@example.test');
   const [emailTo, setEmailTo] = useState('user@example.test');
   const [emailSubject, setEmailSubject] = useState('DNS lab test');
@@ -1167,6 +1508,24 @@ export default function App() {
     loading: false,
     message: 'Not loaded.',
   });
+  const [readmeText, setReadmeText] = useState<string>('Loading README...');
+  const [readmeError, setReadmeError] = useState<string>('');
+  const [topologyHealth, setTopologyHealth] = useState<
+    Record<string, TopologyHealth>
+  >({});
+  const [scenarioStatus, setScenarioStatus] = useState('');
+  const [activeScenario, setActiveScenario] = useState<ScenarioId | null>(null);
+  const [scenarioBusy, setScenarioBusy] = useState(false);
+  const [scenarioPerfTable, setScenarioPerfTable] =
+    useState<Record<ScenarioId, ScenarioPerfRow>>(DEFAULT_PERF_TABLE);
+  const [scenarioResourceTable, setScenarioResourceTable] =
+    useState<Record<ScenarioId, ScenarioResourceRow>>(DEFAULT_RESOURCE_TABLE);
+  const [scenarioSecurityTable, setScenarioSecurityTable] =
+    useState<Record<ScenarioId, ScenarioSecurityRow>>(DEFAULT_SECURITY_TABLE);
+  const [analysisNotes, setAnalysisNotes] = useState('');
+
+  const isAuthError = (err: Error) =>
+    err.message.includes('HTTP 401') || err.message.includes('HTTP 403');
 
   const scrollToConfigs = () => {
     const target = document.getElementById('configs');
@@ -1174,6 +1533,350 @@ export default function App() {
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
       window.location.hash = 'configs';
     }
+  };
+
+  const refreshTopologyHealth = async () => {
+    const updates: Record<string, TopologyHealth> = {};
+    for (const node of TOPOLOGY_NODES) {
+      updates[node.name] = { health: 'unknown', detail: 'Not checked' };
+    }
+
+    const markNode = (name: string, ok: boolean, detail?: string) => {
+      updates[name] = {
+        health: ok ? 'up' : 'down',
+        detail: detail || (ok ? 'ok' : 'failed'),
+      };
+    };
+
+    const markUnknown = (name: string, detail: string) => {
+      updates[name] = { health: 'unknown', detail };
+    };
+
+    await Promise.all([
+      (async () => {
+        try {
+          const res = await getJson<HealthResponse>(
+            `${API_BASE}/trusted/health`,
+            clientHeaders
+          );
+          markNode(
+            'client',
+            Boolean(res.ok),
+            res.ok ? `profile=${res.profile || 'trusted'}` : 'health check failed'
+          );
+        } catch (err) {
+          const error = err as Error;
+          if (isAuthError(error)) {
+            markUnknown('client', 'missing client API key');
+          } else {
+            markNode('client', false, error.message);
+          }
+        }
+      })(),
+      (async () => {
+        try {
+          const res = await getJson<HealthResponse>(
+            `${API_BASE}/untrusted/health`,
+            clientHeaders
+          );
+          markNode(
+            'untrusted',
+            Boolean(res.ok),
+            res.ok ? `profile=${res.profile || 'untrusted'}` : 'health check failed'
+          );
+        } catch (err) {
+          const error = err as Error;
+          if (isAuthError(error)) {
+            markUnknown('untrusted', 'missing client API key');
+          } else {
+            markNode('untrusted', false, error.message);
+          }
+        }
+      })(),
+      (async () => {
+        try {
+          const res = await getJson<{ ok: boolean }>(
+            `${LAB_API_BASE}/health`,
+            labHeaders
+          );
+          markNode('lab_api', Boolean(res.ok), res.ok ? 'ok' : 'health check failed');
+        } catch (err) {
+          markNode('lab_api', false, (err as Error).message);
+        }
+      })(),
+    ]);
+
+    if (missingLabKey) {
+      markUnknown('authoritative_parent', 'missing lab API key');
+      markUnknown('authoritative_child', 'missing lab API key');
+      markUnknown('resolver', 'missing lab API key');
+      markUnknown('resolver_plain', 'missing lab API key');
+      markUnknown('dot_proxy', 'missing lab API key');
+      markUnknown('doh_proxy', 'missing lab API key');
+      setTopologyHealth((prev) => ({ ...prev, ...updates }));
+      return;
+    }
+
+    try {
+      const agent = await getJson<AgentStatusResponse>(
+        `${LAB_API_BASE}/agent/status`,
+        labHeaders
+      );
+      const authChecks = agent.agents.authoritative?.checks || [];
+      const resolverChecks = agent.agents.resolver?.checks || [];
+      for (const check of [...authChecks, ...resolverChecks]) {
+        if (!check.name) continue;
+        const detail = check.ok
+          ? `tcp ${check.latency_ms?.toFixed(1) ?? '?'}ms`
+          : check.detail || 'check failed';
+        markNode(check.name, check.ok, detail);
+      }
+    } catch (err) {
+      const error = err as Error;
+      if (isAuthError(error)) {
+        markUnknown('authoritative_parent', 'missing lab API key');
+        markUnknown('authoritative_child', 'missing lab API key');
+        markUnknown('resolver', 'missing lab API key');
+        markUnknown('resolver_plain', 'missing lab API key');
+      } else {
+        markUnknown('authoritative_parent', error.message);
+        markUnknown('authoritative_child', error.message);
+        markUnknown('resolver', error.message);
+        markUnknown('resolver_plain', error.message);
+      }
+    }
+
+    try {
+      const dot = await postJson<PrivacyCheckResponse>(
+        `${LAB_API_BASE}/privacy/dot-check`,
+        { name: PRIVACY_EXISTING_NAME, qtype: 'A' },
+        labHeaders
+      );
+      markNode(
+        'dot_proxy',
+        Boolean(dot.ok),
+        dot.ok ? `dot ${dot.elapsed_ms}ms` : dot.detail || 'check failed'
+      );
+    } catch (err) {
+      const error = err as Error;
+      if (isAuthError(error)) {
+        markUnknown('dot_proxy', 'missing lab API key');
+      } else {
+        markNode('dot_proxy', false, error.message);
+      }
+    }
+
+    try {
+      const doh = await postJson<PrivacyCheckResponse>(
+        `${LAB_API_BASE}/privacy/doh-check`,
+        { name: PRIVACY_EXISTING_NAME, qtype: 'A' },
+        labHeaders
+      );
+      markNode(
+        'doh_proxy',
+        Boolean(doh.ok),
+        doh.ok ? `doh ${doh.elapsed_ms}ms` : doh.detail || 'check failed'
+      );
+    } catch (err) {
+      const error = err as Error;
+      if (isAuthError(error)) {
+        markUnknown('doh_proxy', 'missing lab API key');
+      } else {
+        markNode('doh_proxy', false, error.message);
+      }
+    }
+
+    setTopologyHealth((prev) => ({ ...prev, ...updates }));
+  };
+
+  const updatePerfCell = (
+    scenarioId: ScenarioId,
+    key: keyof ScenarioPerfRow,
+    value: string
+  ) => {
+    setScenarioPerfTable((prev) => ({
+      ...prev,
+      [scenarioId]: { ...prev[scenarioId], [key]: value },
+    }));
+  };
+
+  const patchPerfRow = (
+    scenarioId: ScenarioId,
+    patch: Partial<ScenarioPerfRow>
+  ) => {
+    setScenarioPerfTable((prev) => ({
+      ...prev,
+      [scenarioId]: { ...prev[scenarioId], ...patch },
+    }));
+  };
+
+  const updateResourceCell = (
+    scenarioId: ScenarioId,
+    key: keyof ScenarioResourceRow,
+    value: string
+  ) => {
+    setScenarioResourceTable((prev) => ({
+      ...prev,
+      [scenarioId]: { ...prev[scenarioId], [key]: value },
+    }));
+  };
+
+  const patchResourceRow = (
+    scenarioId: ScenarioId,
+    patch: Partial<ScenarioResourceRow>
+  ) => {
+    setScenarioResourceTable((prev) => ({
+      ...prev,
+      [scenarioId]: { ...prev[scenarioId], ...patch },
+    }));
+  };
+
+  const updateSecurityCell = (
+    scenarioId: ScenarioId,
+    key: keyof ScenarioSecurityRow,
+    value: string
+  ) => {
+    setScenarioSecurityTable((prev) => ({
+      ...prev,
+      [scenarioId]: { ...prev[scenarioId], [key]: value },
+    }));
+  };
+
+  const patchSecurityRow = (
+    scenarioId: ScenarioId,
+    patch: Partial<ScenarioSecurityRow>
+  ) => {
+    setScenarioSecurityTable((prev) => ({
+      ...prev,
+      [scenarioId]: { ...prev[scenarioId], ...patch },
+    }));
+  };
+
+  const downloadCsv = (filename: string, rows: Array<Array<string>>) => {
+    const escapeCell = (value: string) => {
+      const normalized = value ?? '';
+      const needsQuote = /[",\n]/.test(normalized);
+      const escaped = normalized.replace(/"/g, '""');
+      return needsQuote ? `"${escaped}"` : escaped;
+    };
+    const content = rows.map((row) => row.map(escapeCell).join(',')).join('\n');
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const exportPerfCsv = () => {
+    const header = [
+      'Konfiguracja',
+      'Availability (%)',
+      'Avg latency (ms)',
+      'p50 (ms)',
+      'p95 (ms)',
+      'p99 (ms)',
+      'QPS max',
+      'Baseline QPS',
+      'Error rate (%)',
+      'Cache hit (%)',
+      'NXDOMAIN (%)',
+      'SERVFAIL (%)',
+      'Upstream QPS',
+      'Uwagi',
+    ];
+    const rows = SCENARIOS.map((scenario) => {
+      const row = scenarioPerfTable[scenario.id];
+      return [
+        scenario.label,
+        row.availabilityPct,
+        row.avgLatency,
+        row.p50,
+        row.p95,
+        row.p99,
+        row.qpsMax,
+        row.baselineQps,
+        row.errorRate,
+        row.cacheHit,
+        row.nxdomain,
+        row.servfail,
+        row.upstreamQps,
+        row.notes,
+      ];
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(`scenario-perf-${stamp}.csv`, [header, ...rows]);
+  };
+
+  const exportResourceCsv = () => {
+    const header = [
+      'Konfiguracja',
+      'CPU (%)',
+      'RAM (MB)',
+      'Mem (%)',
+      'Rate-limited (%)',
+      'Upstream QPS',
+      'Amplifikacja UDP (B)',
+      'Amplifikacja TCP (B)',
+      'Avg UDP (B)',
+      'Avg TCP (B)',
+      'TC rate (%)',
+      'TCP fallback (%)',
+      'Uwagi',
+    ];
+    const rows = SCENARIOS.map((scenario) => {
+      const row = scenarioResourceTable[scenario.id];
+      return [
+        scenario.label,
+        row.cpu,
+        row.ram,
+        row.memPct,
+        row.ratelimitedPct,
+        row.upstreamQps,
+        row.amplificationUdp,
+        row.amplificationTcp,
+        row.avgUdpSize,
+        row.avgTcpSize,
+        row.tcRate,
+        row.tcpRate,
+        row.notes,
+      ];
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(`scenario-resources-${stamp}.csv`, [header, ...rows]);
+  };
+
+  const exportSecurityCsv = () => {
+    const header = [
+      'Konfiguracja',
+      'DNSSEC OK (%)',
+      'BOGUS (%)',
+      'DoT success (%)',
+      'DoH success (%)',
+      'Cert errors (%)',
+      'QNAME minimization',
+      'ECS leakage',
+      'Uwagi',
+    ];
+    const rows = SCENARIOS.map((scenario) => {
+      const row = scenarioSecurityTable[scenario.id];
+      return [
+        scenario.label,
+        row.dnssecOkPct,
+        row.bogusPct,
+        row.dotSuccessPct,
+        row.dohSuccessPct,
+        row.certErrorsPct,
+        row.qnameMin,
+        row.ecsLeakage,
+        row.notes,
+      ];
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCsv(`scenario-security-${stamp}.csv`, [header, ...rows]);
   };
 
   const clientBase = `${API_BASE}/${req.client}`;
@@ -1272,6 +1975,36 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    refreshTopologyHealth();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadReadme = async () => {
+      try {
+        const res = await fetch('/readme.md');
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const text = await res.text();
+        if (!cancelled) {
+          setReadmeText(text.trim());
+          setReadmeError('');
+        }
+      } catch {
+        if (!cancelled) {
+          setReadmeText('');
+          setReadmeError('README.md not available.');
+        }
+      }
+    };
+    loadReadme();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (configGroup === 'authoritative') {
       if (configServer !== 'child' && configServer !== 'parent') {
         setConfigServer('child');
@@ -1289,6 +2022,17 @@ export default function App() {
       setConfigPath(visibleConfigFiles[0].path);
     }
   }, [visibleConfigFiles, configPath]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        RUNBOOK_VISIBILITY_KEY,
+        JSON.stringify(runbookHidden)
+      );
+    } catch {
+      // Ignore local storage errors.
+    }
+  }, [runbookHidden]);
 
   const runDig = async () => {
     await runDigWithRequest(req, 'Running dig...');
@@ -1496,6 +2240,326 @@ export default function App() {
     setStatus('Loaded QNAME minimization preset.');
   };
 
+  const runScenario = async (scenarioId: ScenarioId) => {
+    if (scenarioBusy) {
+      return;
+    }
+    setScenarioBusy(true);
+    setScenarioStatus(`Applying ${scenarioId}...`);
+    setActiveScenario(scenarioId);
+    setActiveSection('scenarios');
+    document.getElementById('scenarios')?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+
+    let scenarioReq: DigRequest = { ...req };
+    let scenarioPerfTarget: PerfTarget = perfTarget;
+    let scenarioAmpDnssec = ampDnssec;
+    let nextUnbound: UnboundControls | null = null;
+    let nextBind: BindControls | null = null;
+    let dotResult: PrivacyCheckResponse | null = null;
+    let dohResult: PrivacyCheckResponse | null = null;
+    let indicatorSnapshot: IndicatorState | null = null;
+    let dnssecCheck:
+      | {
+          ad?: boolean;
+          rcode?: string;
+        }
+      | null = null;
+
+    try {
+      if (scenarioId === 'S1') {
+        scenarioReq = {
+          ...scenarioReq,
+          client: 'trusted',
+          resolver: 'plain',
+          dnssec: false,
+          name: 'www.example.test',
+          qtype: 'A',
+        };
+        scenarioPerfTarget = 'resolver_plain';
+        scenarioAmpDnssec = false;
+        setReq(scenarioReq);
+        setPerfTarget(scenarioPerfTarget);
+        setAmpDnssec(false);
+        setMixDnssec(false);
+      } else if (scenarioId === 'S2') {
+        scenarioReq = {
+          ...scenarioReq,
+          client: 'trusted',
+          resolver: 'valid',
+          dnssec: true,
+          name: 'www.example.test',
+          qtype: 'A',
+        };
+        scenarioPerfTarget = 'resolver_valid';
+        scenarioAmpDnssec = true;
+        setReq(scenarioReq);
+        setPerfTarget(scenarioPerfTarget);
+        setAmpDnssec(true);
+        setMixDnssec(true);
+      } else if (scenarioId === 'S3') {
+        scenarioReq = {
+          ...scenarioReq,
+          client: 'trusted',
+          resolver: 'valid',
+          dnssec: true,
+        };
+        scenarioPerfTarget = 'resolver_valid';
+        setReq(scenarioReq);
+        setPerfTarget(scenarioPerfTarget);
+        nextUnbound = { ...unboundCtl, aggressive_nsec: true };
+        setUnboundCtl(nextUnbound);
+      } else if (scenarioId === 'S4') {
+        scenarioReq = {
+          ...scenarioReq,
+          client: 'trusted',
+          resolver: 'valid',
+          dnssec: true,
+        };
+        scenarioPerfTarget = 'resolver_valid';
+        setReq(scenarioReq);
+        setPerfTarget(scenarioPerfTarget);
+        if (missingLabKey) {
+          setScenarioStatus('S4 requires Lab API key to switch signing mode.');
+          return;
+        }
+        try {
+          await switchSigningMode('nsec3');
+        } catch (err) {
+          setScenarioStatus((err as Error).message);
+          return;
+        }
+      } else if (scenarioId === 'S5') {
+        setPrivacyTab('dot');
+      } else if (scenarioId === 'S6') {
+        nextUnbound = {
+          ...unboundCtl,
+          ratelimit: 100,
+          ip_ratelimit: 25,
+          aggressive_nsec: true,
+        };
+        nextBind = {
+          ...bindCtl,
+          rrl_enabled: true,
+          rrl_responses_per_second: 10,
+          rrl_window: 5,
+          rrl_slip: 2,
+        };
+        setUnboundCtl(nextUnbound);
+        setBindCtl(nextBind);
+      }
+
+      if (missingLabKey) {
+        setScenarioStatus('Missing Lab API key. Settings applied only.');
+        return;
+      }
+
+      if (nextUnbound || nextBind) {
+        setScenarioStatus('Applying Controls...');
+        await applyControls({
+          unbound: nextUnbound ?? unboundCtl,
+          bind: nextBind ?? bindCtl,
+        });
+      }
+
+      if (scenarioId === 'S3') {
+        setScenarioStatus('Running aggressive NSEC proof (cold)...');
+        await runAggressiveNsecProofCold();
+      } else if (scenarioId === 'S5') {
+        setScenarioStatus('Running DoT check...');
+        dotResult = await runPrivacyCheck('dot');
+        setScenarioStatus('Running DoH check...');
+        dohResult = await runPrivacyCheck('doh');
+      }
+
+      setScenarioStatus('Refreshing indicators...');
+      indicatorSnapshot = await loadIndicators();
+      if (scenarioReq.dnssec) {
+        setScenarioStatus('Checking DNSSEC validation...');
+        try {
+          dnssecCheck = await executeLabDig({
+            ...scenarioReq,
+            dnssec: true,
+            trace: false,
+            short: false,
+          });
+        } catch {
+          dnssecCheck = null;
+        }
+      }
+
+      setScenarioStatus('Running baseline (availability + probe)...');
+      let baseline = await runBaseline(scenarioReq);
+      if (!baseline && scenarioId === 'S4') {
+        setScenarioStatus('Baseline failed after NSEC3 switch. Retrying in 5s...');
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        setScenarioStatus('Retrying baseline (availability + probe)...');
+        baseline = await runBaseline(scenarioReq);
+      }
+      const baselineFailed = !baseline;
+      if (baselineFailed) {
+        setScenarioStatus(
+          'Baseline failed. Some table fields will be empty. Check Availability status.'
+        );
+      }
+
+      setScenarioStatus('Running dnsperf (throughput + latency)...');
+      const dnsperf = await runDnsperf(scenarioPerfTarget);
+
+      setScenarioStatus('Running amplification test...');
+      const ampResults = await runAmplificationTest({
+        profile: scenarioReq.client,
+        resolver: scenarioReq.resolver,
+        dnssec: scenarioAmpDnssec,
+        name: ampName,
+      });
+
+      const perfPatch: Partial<ScenarioPerfRow> = {};
+      if (baseline) {
+        perfPatch.availabilityPct =
+          baseline.availability_ratio !== undefined
+            ? (baseline.availability_ratio * 100).toFixed(2)
+            : '';
+        perfPatch.avgLatency =
+          baseline.avg_ms !== undefined && baseline.avg_ms > 0
+            ? baseline.avg_ms.toFixed(2)
+            : '';
+        perfPatch.p50 =
+          typeof baseline.p50_ms === 'number' && baseline.p50_ms > 0
+            ? baseline.p50_ms.toFixed(1)
+            : '';
+        perfPatch.p95 =
+          typeof baseline.p95_ms === 'number' && baseline.p95_ms > 0
+            ? baseline.p95_ms.toFixed(1)
+            : '';
+        perfPatch.p99 =
+          typeof baseline.p99_ms === 'number' && baseline.p99_ms > 0
+            ? baseline.p99_ms.toFixed(1)
+            : '';
+        perfPatch.baselineQps =
+          typeof baseline.qps === 'number' ? baseline.qps.toFixed(2) : '';
+        perfPatch.cacheHit =
+          typeof baseline.cache_hit_ratio === 'number'
+            ? (baseline.cache_hit_ratio * 100).toFixed(2)
+            : '';
+        perfPatch.nxdomain =
+          typeof baseline.nxdomain_ratio === 'number'
+            ? (baseline.nxdomain_ratio * 100).toFixed(2)
+            : '';
+        perfPatch.servfail =
+          typeof baseline.servfail_ratio === 'number'
+            ? (baseline.servfail_ratio * 100).toFixed(2)
+            : '';
+        perfPatch.upstreamQps =
+          baseline.upstream_qps !== undefined
+            ? baseline.upstream_qps.toFixed(2)
+            : '';
+      }
+      if (dnsperf) {
+        perfPatch.qpsMax = dnsperf.qps !== undefined ? dnsperf.qps.toFixed(2) : '';
+        if (dnsperf.avg_latency_ms !== undefined) {
+          perfPatch.avgLatency = dnsperf.avg_latency_ms.toFixed(2);
+        }
+        if (
+          dnsperf.queries_sent !== undefined &&
+          dnsperf.queries_lost !== undefined &&
+          dnsperf.queries_sent > 0
+        ) {
+          const errRate = (dnsperf.queries_lost / dnsperf.queries_sent) * 100;
+          perfPatch.errorRate = errRate.toFixed(2);
+        }
+      }
+      patchPerfRow(scenarioId, perfPatch);
+
+      const resourcePatch: Partial<ScenarioResourceRow> = {};
+      if (baseline) {
+        resourcePatch.cpu =
+          baseline.cpu_pct !== undefined
+            ? formatPercentValue(baseline.cpu_pct)
+            : '';
+        resourcePatch.ram =
+          baseline.mem_mb !== undefined ? baseline.mem_mb.toFixed(1) : '';
+        resourcePatch.memPct =
+          baseline.mem_pct !== undefined
+            ? formatPercentValue(baseline.mem_pct)
+            : '';
+        resourcePatch.ratelimitedPct =
+          baseline.ratelimited_ratio !== undefined
+            ? formatPercentValue(baseline.ratelimited_ratio * 100)
+            : '';
+        resourcePatch.upstreamQps =
+          baseline.upstream_qps !== undefined
+            ? baseline.upstream_qps.toFixed(2)
+            : '';
+      }
+      if (ampResults && ampResults.length > 0) {
+        const maxUdp = Math.max(...ampResults.map((row) => row.max_udp_size));
+        const maxTcp = Math.max(...ampResults.map((row) => row.max_tcp_size));
+        const avgUdp =
+          ampResults.reduce((sum, row) => sum + row.avg_udp_size, 0) /
+          ampResults.length;
+        const avgTcp =
+          ampResults.reduce((sum, row) => sum + row.avg_tcp_size, 0) /
+          ampResults.length;
+        const avgTcRate =
+          ampResults.reduce((sum, row) => sum + row.tc_rate, 0) /
+          ampResults.length;
+        const avgTcpRate =
+          ampResults.reduce((sum, row) => sum + row.tcp_rate, 0) /
+          ampResults.length;
+        resourcePatch.amplificationUdp = Number.isFinite(maxUdp)
+          ? String(Math.round(maxUdp))
+          : '';
+        resourcePatch.amplificationTcp = Number.isFinite(maxTcp)
+          ? String(Math.round(maxTcp))
+          : '';
+        resourcePatch.avgUdpSize = Number.isFinite(avgUdp) ? avgUdp.toFixed(1) : '';
+        resourcePatch.avgTcpSize = Number.isFinite(avgTcp) ? avgTcp.toFixed(1) : '';
+        resourcePatch.tcRate = Number.isFinite(avgTcRate)
+          ? (avgTcRate * 100).toFixed(2)
+          : '';
+        resourcePatch.tcpRate = Number.isFinite(avgTcpRate)
+          ? (avgTcpRate * 100).toFixed(2)
+          : '';
+      }
+      patchResourceRow(scenarioId, resourcePatch);
+
+      const securityPatch: Partial<ScenarioSecurityRow> = {};
+      if (dnssecCheck?.ad === true) {
+        securityPatch.dnssecOkPct = '100';
+        securityPatch.bogusPct = '0';
+      } else if (dnssecCheck?.ad === false && scenarioReq.dnssec) {
+        securityPatch.dnssecOkPct = '0';
+      }
+      if (dotResult) {
+        securityPatch.dotSuccessPct =
+          dotResult.ok && dotResult.rcode === 'NOERROR' ? '100' : '0';
+      }
+      if (dohResult) {
+        securityPatch.dohSuccessPct =
+          dohResult.ok && dohResult.rcode === 'NOERROR' ? '100' : '0';
+      }
+      if (indicatorSnapshot?.qnameMinim !== undefined) {
+        securityPatch.qnameMin = formatIndicator(indicatorSnapshot.qnameMinim);
+      }
+      if (Object.keys(securityPatch).length > 0) {
+        patchSecurityRow(scenarioId, securityPatch);
+      }
+
+      setScenarioStatus(
+        baselineFailed
+          ? `Scenario ${scenarioId} completed. Baseline failed; some fields are empty.`
+          : `Scenario ${scenarioId} completed. Results written to tables.`
+      );
+    } catch (err) {
+      setScenarioStatus((err as Error).message);
+    } finally {
+      setScenarioBusy(false);
+    }
+  };
+
   const runQnameMin = async () => {
     const request: DigRequest = {
       ...req,
@@ -1510,197 +2574,6 @@ export default function App() {
     await runDigWithRequest(request, 'Running QNAME minimization query...');
     if (!missingLabKey) {
       await loadIndicators();
-    }
-  };
-
-  const runAggressiveNsecDemo = async () => {
-    const base: DigRequest = {
-      ...req,
-      resolver: 'valid',
-      qtype: 'A',
-      dnssec: true,
-      trace: false,
-      short: false,
-    };
-    const firstReq: DigRequest = { ...base, name: 'nope1.example.test' };
-    const secondReq: DigRequest = { ...base, name: 'nope2.example.test' };
-
-    setReq(firstReq);
-    setIsBusy(true);
-    setStatus('Running aggressive NSEC demo (two NXDOMAIN queries)...');
-    try {
-      const first = await executeDigRequest(firstReq);
-      const second = await executeDigRequest(secondReq);
-      const combinedText = [
-        '# Aggressive NSEC proof (expected NXDOMAIN)',
-        `# Query 1: ${firstReq.name}`,
-        first.output.command,
-        '',
-        first.output.text,
-        '',
-        `# Query 2: ${secondReq.name}`,
-        second.output.command,
-        '',
-        second.output.text,
-      ].join('\n');
-      setOutput({
-        ok: first.ok && second.ok,
-        command: 'dig (2 queries)',
-        text: combinedText,
-      });
-      setStatus(
-        `Aggressive NSEC demo completed. Q1: ${formatDemoStatus(
-          first.rcode,
-          first.ad
-        )}, Q2: ${formatDemoStatus(second.rcode, second.ad)}`
-      );
-    } catch (err) {
-      setStatus((err as Error).message);
-      setOutput(null);
-    } finally {
-      if (outputRef.current) {
-        outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      setIsBusy(false);
-    }
-  };
-
-  const runAggressiveNsecProof = async () => {
-    if (missingLabKey) {
-      setProofStatus('Missing Lab API key.');
-      return;
-    }
-
-    const zone = 'example.test';
-    const base: DigRequest = {
-      ...req,
-      client: 'trusted',
-      resolver: 'valid',
-      qtype: 'A',
-      dnssec: true,
-      trace: false,
-      short: false,
-    };
-    const firstReq: DigRequest = {
-      ...base,
-      name: `nope1-${Math.random().toString(36).slice(2, 7)}.${zone}`,
-    };
-    let secondReq: DigRequest = {
-      ...base,
-      name: `nope2-${Math.random().toString(36).slice(2, 7)}.${zone}`,
-    };
-
-    setProofBusy(true);
-    setProofStatus('Preparing proof...');
-    setProofOutput('');
-    setProofCaptureFile('');
-
-    try {
-      if (proofColdCache) {
-        setProofStatus('Restarting resolver to clear cache...');
-        await postJson<LabDigResponse>(
-          `${LAB_API_BASE}/resolver/restart`,
-          {},
-          labHeaders
-        );
-        await new Promise((resolve) => setTimeout(resolve, 3000));
-      } else if (proofFlushCache) {
-        setProofStatus('Flushing resolver cache (example.test)...');
-        await postJson<LabDigResponse>(
-          `${LAB_API_BASE}/resolver/flush`,
-          { zone: 'example.test' },
-          labHeaders
-        );
-        await new Promise((resolve) => setTimeout(resolve, 800));
-      }
-
-      setProofStatus('Starting authoritative capture...');
-      const start = await postJson<CaptureStartResponse>(
-        `${LAB_API_BASE}/capture/start`,
-        { target: 'authoritative', filter: 'dns' },
-        labHeaders
-      );
-      setProofCaptureFile(start.file);
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      setProofStatus('Running aggressive NSEC demo (two NXDOMAIN queries)...');
-      const first = await executeLabDig(firstReq);
-      const interval = parseNsecInterval(first.output.text);
-      if (interval) {
-        const picked = pickLabelBetween(interval.owner, interval.next, zone);
-        if (picked) {
-          secondReq = { ...base, name: picked };
-        }
-      }
-      const second = await executeLabDig(secondReq);
-
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      setProofStatus('Stopping capture...');
-      const stopped = await postJson<CaptureStopResponse>(
-        `${LAB_API_BASE}/capture/stop`,
-        { target: 'authoritative' },
-        labHeaders
-      );
-
-      const file = stopped.file || start.file;
-      setProofCaptureFile(file || '');
-
-      let summaryText = 'No capture summary.';
-      if (file) {
-        const summary = await getJson<CaptureSummaryResponse>(
-          `${LAB_API_BASE}/capture/summary?file=${encodeURIComponent(file)}`,
-          labHeaders
-        );
-        const warningLines: string[] = [];
-        if (summary.total_packets === 0) {
-          warningLines.push(
-            'WARNING: capture empty (0 packets). Likely cache hit or capture failed.'
-          );
-        } else if (summary.upstream_queries === 0) {
-          warningLines.push(
-            'WARNING: no resolver -> authoritative traffic captured (cache hit likely).'
-          );
-        }
-        summaryText = [
-          '# Capture summary',
-          `file: ${summary.file}`,
-          `total DNS packets: ${summary.total_packets}`,
-          `upstream queries (resolver -> authoritative): ${summary.upstream_queries}`,
-          ...(warningLines.length ? ['', ...warningLines] : []),
-        ].join('\n');
-        if (warningLines.length) {
-          setProofStatus(
-            'Capture empty. Restart resolver (cold cache) and rerun Demo + Proof.'
-          );
-        }
-      }
-
-      const combinedText = [
-        `# Query 1: ${firstReq.name}`,
-        first.output.command,
-        '',
-        first.output.text,
-        '',
-        `# Query 2: ${secondReq.name}`,
-        second.output.command,
-        '',
-        second.output.text,
-        '',
-        summaryText,
-      ].join('\n');
-
-      setProofOutput(combinedText);
-      setProofStatus('Aggressive NSEC proof completed.');
-    } catch (err) {
-      setProofOutput('');
-      await maybeAttachStartupDiagnostics(
-        (err as Error).message,
-        setProofStatus,
-        setProofOutput
-      );
-    } finally {
-      setProofBusy(false);
     }
   };
 
@@ -1765,7 +2638,7 @@ export default function App() {
         return;
       }
 
-      setProofStatus('Cold run: running aggressive NSEC demo...');
+      setProofStatus('Cold run: running aggressive NSEC proof...');
       const first = await executeLabDig(firstReq);
       const interval = parseNsecInterval(first.output.text);
       if (interval) {
@@ -1883,12 +2756,6 @@ export default function App() {
     }
   };
 
-  const clearProofOutput = () => {
-    setProofOutput('');
-    setProofStatus('');
-    setProofCaptureFile('');
-  };
-
   const checkHealth = async () => {
     setIsBusy(true);
     setStatus('Checking health...');
@@ -1918,6 +2785,7 @@ export default function App() {
     } finally {
       setIsBusy(false);
     }
+    await refreshTopologyHealth();
   };
 
   const viewLogs = async (service: 'bind' | 'unbound') => {
@@ -2074,13 +2942,13 @@ export default function App() {
     void loadCaptures();
   }, [missingLabKey]);
 
-  const loadIndicators = async () => {
+  const loadIndicators = async (): Promise<IndicatorState | null> => {
     if (missingLabKey) {
       setIndicators({
         loading: false,
         message: 'Missing Lab API key.',
       });
-      return;
+      return null;
     }
 
     setIndicators({ loading: true, message: 'Loading indicators...' });
@@ -2162,7 +3030,7 @@ export default function App() {
       qnameDetail = (err as Error).message;
     }
 
-    setIndicators({
+    const nextIndicators: IndicatorState = {
       loading: false,
       message: 'Indicators updated.',
       nsec3Child: childEnabled,
@@ -2174,7 +3042,9 @@ export default function App() {
       aggressiveDetail,
       qnameDetail,
       updatedAt: new Date().toLocaleString(),
-    });
+    };
+    setIndicators(nextIndicators);
+    return nextIndicators;
   };
 
   useEffect(() => {
@@ -2292,6 +3162,84 @@ export default function App() {
     }
   };
 
+  const runbookLabel = (id: RunbookId) =>
+    RUNBOOKS.find((entry) => entry.id === id)?.title || id;
+
+  const updateRunbookQueue = (index: number, value: RunbookId) => {
+    setRunbookQueue((prev) => prev.map((item, i) => (i === index ? value : item)));
+  };
+
+  const toggleRunbookHidden = (id: RunbookId) => {
+    setRunbookHidden((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const runRunbookSequence = async (ids: RunbookId[]) => {
+    if (missingLabKey) {
+      setRunbookStatus('Missing Lab API key.');
+      return;
+    }
+    if (runbookBusy) {
+      return;
+    }
+    setRunbookBusy(true);
+    try {
+      for (let i = 0; i < ids.length; i += 1) {
+        const id = ids[i];
+        const label = runbookLabel(id);
+        setRunbookStatus(`Running ${label} (${i + 1}/${ids.length})...`);
+        const result = await postJson<RunbookResponse>(
+          `${LAB_API_BASE}/runbook/${id}`,
+          {},
+          labHeaders
+        );
+        setRunbookResults((prev) => ({ ...prev, [id]: result }));
+        setRunbookStatus(
+          result.ok
+            ? `${label} completed (${i + 1}/${ids.length}).`
+            : `${label} completed with failures (${i + 1}/${ids.length}).`
+        );
+        if (!result.ok) {
+          break;
+        }
+      }
+    } catch (err) {
+      setRunbookStatus((err as Error).message);
+    } finally {
+      setRunbookBusy(false);
+    }
+  };
+
+  const runRunbook = async (id: RunbookId) => {
+    if (missingLabKey) {
+      setRunbookStatus('Missing Lab API key.');
+      return;
+    }
+    const label = runbookLabel(id);
+    setRunbookBusy(true);
+    setRunbookStatus(`Running ${label}...`);
+    try {
+      const result = await postJson<RunbookResponse>(
+        `${LAB_API_BASE}/runbook/${id}`,
+        {},
+        labHeaders
+      );
+      setRunbookResults((prev) => ({ ...prev, [id]: result }));
+      setRunbookStatus(
+        result.ok
+          ? `${label} completed.`
+          : `${label} completed with failures.`
+      );
+    } catch (err) {
+      setRunbookStatus((err as Error).message);
+    } finally {
+      setRunbookBusy(false);
+    }
+  };
+
+  const clearRunbook = (id: RunbookId) => {
+    setRunbookResults((prev) => ({ ...prev, [id]: null }));
+  };
+
   const downloadCapture = async (file: string) => {
     setIsBusy(true);
     setCaptureStatus(`Downloading ${file}...`);
@@ -2337,10 +3285,12 @@ export default function App() {
     return lines.join('\n');
   };
 
-  const runPrivacyCheck = async (kind: 'dot' | 'doh') => {
+  const runPrivacyCheck = async (
+    kind: 'dot' | 'doh'
+  ): Promise<PrivacyCheckResponse | null> => {
     if (missingLabKey) {
       setPrivacyStatus('Missing Lab API key.');
-      return;
+      return null;
     }
     setPrivacyBusy(true);
     setPrivacyStatus(`Running ${kind.toUpperCase()} check...`);
@@ -2361,12 +3311,14 @@ export default function App() {
           `${kind.toUpperCase()} check completed (${result.rcode ?? 'unknown'})`
         );
       }
+      return result;
     } catch (err) {
       await maybeAttachStartupDiagnostics(
         (err as Error).message,
         setPrivacyStatus,
         setPrivacyOutput
       );
+      return null;
     } finally {
       setPrivacyBusy(false);
     }
@@ -2385,6 +3337,99 @@ export default function App() {
       blocks.push(`STDERR:\n${stderr.trimEnd()}`);
     }
     return blocks.join('\n\n');
+  };
+
+  const createMailbox = async () => {
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    if (!emailUserAddress.trim() || !emailUserPassword.trim()) {
+      setEmailStatus('Provide mailbox address and password.');
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Creating mailbox...');
+    setEmailUserOutput('');
+    try {
+      const res = await postJson<EmailUserResponse>(
+        `${LAB_API_BASE}/email/user/add`,
+        {
+          email: emailUserAddress.trim(),
+          password: emailUserPassword,
+        },
+        labHeaders
+      );
+      setEmailUserOutput(formatCommandOutput(res.command, res.stdout, res.stderr));
+      setEmailStatus(res.ok ? 'Mailbox ready.' : 'Mailbox setup failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const updateMailboxPassword = async () => {
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    if (!emailUserAddress.trim() || !emailUserPassword.trim()) {
+      setEmailStatus('Provide mailbox address and new password.');
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Updating mailbox password...');
+    setEmailUserOutput('');
+    try {
+      const res = await postJson<EmailUserResponse>(
+        `${LAB_API_BASE}/email/user/update`,
+        {
+          email: emailUserAddress.trim(),
+          password: emailUserPassword,
+        },
+        labHeaders
+      );
+      setEmailUserOutput(formatCommandOutput(res.command, res.stdout, res.stderr));
+      setEmailStatus(res.ok ? 'Mailbox password updated.' : 'Password update failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const deleteMailbox = async () => {
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    if (!emailUserAddress.trim()) {
+      setEmailStatus('Provide mailbox address to delete.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete mailbox ${emailUserAddress.trim()}? This cannot be undone.`
+    );
+    if (!confirmed) {
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Deleting mailbox...');
+    setEmailUserOutput('');
+    try {
+      const res = await postJson<EmailUserResponse>(
+        `${LAB_API_BASE}/email/user/delete`,
+        { email: emailUserAddress.trim() },
+        labHeaders
+      );
+      setEmailUserOutput(formatCommandOutput(res.command, res.stdout, res.stderr));
+      setEmailStatus(res.ok ? 'Mailbox deleted.' : 'Mailbox delete failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
   };
 
   const sendEmail = async () => {
@@ -2453,26 +3498,76 @@ export default function App() {
     }
   };
 
-  const checkImap = async () => {
+  const loadInboxList = async () => {
     if (missingLabKey) {
       setEmailStatus('Missing Lab API key.');
       return;
     }
     setEmailBusy(true);
-    setEmailStatus('Checking IMAP (headers)...');
-    setEmailImapOutput('');
+    setEmailStatus('Loading inbox messages...');
+    setEmailInboxRaw('');
     try {
-      const res = await postJson<EmailImapResponse>(
-        `${LAB_API_BASE}/email/imap-check`,
+      const res = await postJson<EmailMessageListResponse>(
+        `${LAB_API_BASE}/email/inbox/list`,
         {
-          user: emailTo,
+          user: emailImapUser,
           mailbox: emailImapMailbox,
           limit: emailImapLimit,
         },
         labHeaders
       );
-      setEmailImapOutput(formatCommandOutput(res.command, res.stdout, res.stderr));
-      setEmailStatus(res.ok ? 'IMAP check complete.' : 'IMAP check failed.');
+      const messages = res.messages ?? [];
+      setEmailInboxMessages(messages);
+      const existing = emailInboxSelected
+        ? messages.find(
+            (msg) =>
+              msg.id === emailInboxSelected.id &&
+              msg.source === emailInboxSelected.source
+          )
+        : undefined;
+      const nextSelected = existing ?? messages[0] ?? null;
+      setEmailInboxSelected(nextSelected);
+      if (!existing) {
+        setEmailInboxContent('');
+      }
+      if (!res.ok) {
+        setEmailInboxRaw(formatCommandOutput(res.command, res.stdout, res.stderr));
+      }
+      setEmailStatus(res.ok ? 'Inbox list loaded.' : 'Inbox list failed.');
+    } catch (err) {
+      setEmailStatus((err as Error).message);
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  const viewInboxMessage = async (message?: EmailMessageSummary | null) => {
+    const target = message ?? emailInboxSelected;
+    if (!target) {
+      setEmailStatus('Select a message to view.');
+      return;
+    }
+    if (missingLabKey) {
+      setEmailStatus('Missing Lab API key.');
+      return;
+    }
+    setEmailBusy(true);
+    setEmailStatus('Loading message...');
+    setEmailInboxContent('');
+    try {
+      const res = await postJson<EmailMessageViewResponse>(
+        `${LAB_API_BASE}/email/inbox/view`,
+        {
+          user: emailImapUser,
+          mailbox: target.mailbox || emailImapMailbox,
+          message_id: target.id,
+          source: target.source,
+          max_lines: 240,
+        },
+        labHeaders
+      );
+      setEmailInboxContent(res.content || res.stdout || '');
+      setEmailStatus(res.ok ? 'Message loaded.' : 'Message load failed.');
     } catch (err) {
       setEmailStatus((err as Error).message);
     } finally {
@@ -2586,18 +3681,21 @@ export default function App() {
     }
   };
 
-  const runDnsperf = async () => {
+  const runDnsperf = async (
+    overrideTarget?: PerfTarget
+  ): Promise<DnsperfSummary | null> => {
     if (missingLabKey) {
       setDnsperfStatus('Missing Lab API key.');
-      return;
+      return null;
     }
+    const target = overrideTarget ?? perfTarget;
     setDnsperfBusy(true);
     setDnsperfStatus('Running dnsperf...');
     setDnsperfOutput('');
     setDnsperfSummary(null);
     try {
       const body: DnsperfRequest = {
-        target: perfTarget,
+        target,
         duration_s: dnsperfDuration,
         qps: dnsperfQps,
         max_queries: dnsperfMaxQueries,
@@ -2614,12 +3712,14 @@ export default function App() {
       setDnsperfOutput(`${result.command}\n\n${text}`.trim());
       setDnsperfSummary(result.summary ?? null);
       setDnsperfStatus(result.ok ? 'dnsperf completed.' : 'dnsperf completed with errors.');
+      return result.summary ?? null;
     } catch (err) {
       await maybeAttachStartupDiagnostics(
         (err as Error).message,
         setDnsperfStatus,
         setDnsperfOutput
       );
+      return null;
     } finally {
       setDnsperfBusy(false);
     }
@@ -2709,11 +3809,14 @@ export default function App() {
     }
   };
 
-  const runBaseline = async () => {
+  const runBaseline = async (
+    overrideReq?: DigRequest
+  ): Promise<BaselineSummary | null> => {
     if (missingLabKey) {
       setBaselineStatus('Missing Lab API key.');
-      return;
+      return null;
     }
+    const activeReq = overrideReq ?? req;
     setBaselineBusy(true);
     setBaselineStatus(`Collecting baseline (${baselineDuration}s)...`);
     setBaselineSummary(null);
@@ -2726,7 +3829,7 @@ export default function App() {
         labHeaders
       );
       const stats = await getJson<ResolverStatsResponse>(
-        `${LAB_API_BASE}/availability/resolver-stats?resolver=${req.resolver}`,
+        `${LAB_API_BASE}/availability/resolver-stats?resolver=${activeReq.resolver}`,
         labHeaders
       );
       try {
@@ -2767,10 +3870,10 @@ export default function App() {
         labHeaders
       );
       const probeBody: AvailabilityProbeRequest = {
-        profile: req.client,
-        resolver: req.resolver,
-        name: req.name,
-        qtype: req.qtype,
+        profile: activeReq.client,
+        resolver: activeReq.resolver,
+        name: activeReq.name,
+        qtype: activeReq.qtype,
         count: baselineProbeCount,
       };
       const probe = await postJson<AvailabilityProbeResponse>(
@@ -2778,34 +3881,46 @@ export default function App() {
         probeBody,
         labHeaders
       );
+      const rcodeCounts = probe.rcode_counts ?? {};
+      const okCount =
+        (rcodeCounts.NOERROR ?? 0) + (rcodeCounts.NXDOMAIN ?? 0);
+      const availabilityRatio =
+        probe.count > 0 ? okCount / probe.count : undefined;
 
       const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
       const totalDelta = after.totals.queries - before.totals.queries;
       const qps = totalDelta / elapsed;
 
-      setBaselineSummary({
+      const summary: BaselineSummary = {
         duration_s: elapsed,
         qps,
         total_queries: totalDelta,
         cache_hit_ratio: after.ratios.cache_hit,
         nxdomain_ratio: after.ratios.nxdomain,
         servfail_ratio: after.ratios.servfail,
+        availability_ratio: availabilityRatio,
+        avg_ms: probe.avg_ms,
         p50_ms: probe.p50_ms ?? probe.avg_ms,
         p95_ms: probe.p95_ms ?? probe.max_ms,
+        p99_ms: probe.p99_ms ?? probe.max_ms,
         cpu_pct: stats.cpu_pct,
         mem_mb: stats.mem_bytes ? stats.mem_bytes / (1024 * 1024) : undefined,
         mem_pct: stats.mem_pct,
+        ratelimited_ratio: after.ratios.ratelimited,
         upstream_qps:
           upstreamQueries !== undefined ? upstreamQueries / elapsed : undefined,
         upstream_queries: upstreamQueries,
         capture_file: captureFile ?? undefined,
-      });
+      };
+      setBaselineSummary(summary);
       if (captureFile) {
         setBaselineCaptureFile(captureFile);
       }
       setBaselineStatus('Baseline completed.');
+      return summary;
     } catch (err) {
       setBaselineStatus((err as Error).message);
+      return null;
     } finally {
       setBaselineBusy(false);
     }
@@ -3041,26 +4156,31 @@ export default function App() {
     );
   };
 
-  const runAmplificationTest = async () => {
+  const runAmplificationTest = async (override?: {
+    profile?: Client;
+    resolver?: ResolverKind;
+    dnssec?: boolean;
+    name?: string;
+  }): Promise<AmplificationResult[] | null> => {
     if (missingLabKey) {
       setAmpStatus('Missing Lab API key.');
-      return;
+      return null;
     }
     if (ampQtypes.length === 0 || ampEdnsSizes.length === 0) {
       setAmpStatus('Select at least one qtype and EDNS size.');
-      return;
+      return null;
     }
     setAmpBusy(true);
     setAmpStatus('Running amplification test...');
     try {
       const body: AmplificationTestRequest = {
-        profile: req.client,
-        resolver: req.resolver,
-        name: ampName,
+        profile: override?.profile ?? req.client,
+        resolver: override?.resolver ?? req.resolver,
+        name: override?.name ?? ampName,
         qtypes: ampQtypes,
         edns_sizes: ampEdnsSizes,
         count_per_qtype: ampCount,
-        dnssec: ampDnssec,
+        dnssec: override?.dnssec ?? ampDnssec,
         tcp_fallback: ampTcpFallback,
       };
       const result = await postJson<AmplificationTestResponse>(
@@ -3070,9 +4190,11 @@ export default function App() {
       );
       setAmpResults(result.results);
       setAmpStatus(`Completed (${result.results.length} rows).`);
+      return result.results;
     } catch (err) {
       setAmpStatus((err as Error).message);
       setAmpResults([]);
+      return null;
     } finally {
       setAmpBusy(false);
     }
@@ -3135,7 +4257,10 @@ export default function App() {
     }
   };
 
-  const applyControls = async () => {
+  const applyControls = async (override?: {
+    unbound?: UnboundControls;
+    bind?: BindControls;
+  }) => {
     if (missingLabKey) {
       setControlsStatus('Missing Lab API key.');
       return;
@@ -3143,9 +4268,13 @@ export default function App() {
     setControlsBusy(true);
     setControlsStatus('Applying controls...');
     try {
+      const payload = {
+        unbound: override?.unbound ?? unboundCtl,
+        bind: override?.bind ?? bindCtl,
+      };
       const result = await postJson<ControlsStatusResponse>(
         `${LAB_API_BASE}/controls/apply`,
-        { unbound: unboundCtl, bind: bindCtl },
+        payload,
         labHeaders
       );
       setUnboundCtl(result.unbound);
@@ -3166,7 +4295,7 @@ export default function App() {
     <div className="page">
       <header className="hero">
         <div className="hero-main">
-          <div className="eyebrow">DNS Security Lab</div>
+          <div className="eyebrow">DNS Security System</div>
           <h1>DNS Security Control System</h1>
           <p>
             One-page console for queries, DNSSEC validation, privacy checks, and
@@ -3285,42 +4414,49 @@ export default function App() {
       <section className="card" id="topology">
         <div className="card-title">Nodes / Topology</div>
         <div className="topology-grid">
-          {TOPOLOGY_NODES.map((node) => (
-            <div key={node.name} className="node-card">
-              <div className="node-header">
-                <div className="node-title">{node.name}</div>
-                <button
-                  type="button"
-                  className={`status-dot action ${healthClass(node.health)}`}
-                  onClick={scrollToConfigs}
-                  title="Open config viewer"
-                >
-                  {healthLabel(node.health)}
-                </button>
-              </div>
-              <div className="node-role">{node.role}</div>
-              <div className="node-meta">
-                <div>
-                  <strong>IP:</strong> {node.ip}
+          {TOPOLOGY_NODES.map((node) => {
+            const nodeHealth = topologyHealth[node.name]?.health ?? node.health;
+            const healthDetail = topologyHealth[node.name]?.detail;
+            const healthTitle = healthDetail
+              ? `Health: ${healthDetail}. Click to open config viewer.`
+              : 'Click to open config viewer.';
+            return (
+              <div key={node.name} className="node-card">
+                <div className="node-header">
+                  <div className="node-title">{node.name}</div>
+                  <button
+                    type="button"
+                    className={`status-dot action ${healthClass(nodeHealth)}`}
+                    onClick={scrollToConfigs}
+                    title={healthTitle}
+                  >
+                    {healthLabel(nodeHealth)}
+                  </button>
                 </div>
-                <div>
-                  <strong>Ports:</strong> {node.ports}
+                <div className="node-role">{node.role}</div>
+                <div className="node-meta">
+                  <div>
+                    <strong>IP:</strong> {node.ip}
+                  </div>
+                  <div>
+                    <strong>Ports:</strong> {node.ports}
+                  </div>
                 </div>
+                <div className="node-tags">
+                  {node.tags.map((tag) => (
+                    <span key={tag} className="tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+                <ul className="node-list">
+                  {node.meta.map((meta) => (
+                    <li key={meta}>{meta}</li>
+                  ))}
+                </ul>
               </div>
-              <div className="node-tags">
-                {node.tags.map((tag) => (
-                  <span key={tag} className="tag">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <ul className="node-list">
-                {node.meta.map((meta) => (
-                  <li key={meta}>{meta}</li>
-                ))}
-              </ul>
-            </div>
-          ))}
+            );
+          })}
         </div>
         <div className="topology-notes">
           <div className="notes-panel">
@@ -3336,9 +4472,169 @@ export default function App() {
               </div>
             ))}
           </div>
-          <div className="notes-image">
-            <img src="/ui-notes.svg" alt="MVP UI notes reference" />
+          <div className="readme-panel">
+            <div className="readme-title">README.md</div>
+            {readmeError ? (
+              <div className="readme-error">{readmeError}</div>
+            ) : (
+              <pre className="readme-content">{readmeText}</pre>
+            )}
           </div>
+        </div>
+      </section>
+      )}
+
+      {isSectionVisible('runbook') && (
+      <section className="card" id="runbook">
+        <div className="card-title">Runbook (manual.md + dns.md)</div>
+        <div className="hint">
+          <div>
+            Executes the documented manual steps via the lab API with an allow-listed
+            command set (topology snapshot, smoke tests, DNSSEC maintenance).
+          </div>
+          <div>
+            Use the results as evidence screenshots for the report where needed.
+          </div>
+        </div>
+        {SHOW_RUNBOOK_QUEUE && (
+          <div className="runbook-queue">
+            <div className="runbook-queue-title">Next runs</div>
+            <div className="runbook-queue-grid">
+              <label>
+                Run 1
+                <select
+                  value={runbookQueue[0]}
+                  onChange={(e) =>
+                    updateRunbookQueue(0, e.target.value as RunbookId)
+                  }
+                >
+                  {RUNBOOKS.map((entry) => (
+                    <option key={`runbook-queue-1-${entry.id}`} value={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Run 2
+                <select
+                  value={runbookQueue[1]}
+                  onChange={(e) =>
+                    updateRunbookQueue(1, e.target.value as RunbookId)
+                  }
+                >
+                  {RUNBOOKS.map((entry) => (
+                    <option key={`runbook-queue-2-${entry.id}`} value={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Run 3
+                <select
+                  value={runbookQueue[2]}
+                  onChange={(e) =>
+                    updateRunbookQueue(2, e.target.value as RunbookId)
+                  }
+                >
+                  {RUNBOOKS.map((entry) => (
+                    <option key={`runbook-queue-3-${entry.id}`} value={entry.id}>
+                      {entry.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="actions">
+              <button
+                onClick={() => runRunbookSequence(runbookQueue)}
+                disabled={runbookBusy || missingLabKey}
+              >
+                Run Next 3
+              </button>
+            </div>
+          </div>
+        )}
+        {missingLabKey && (
+          <div className="alert">
+            <strong>Missing Lab API key.</strong> Set <code>VITE_LAB_API_KEY</code> in
+            <code>.env.local</code> to match <code>LAB_API_KEY</code> from
+            <code>docker-compose.yml</code>.
+          </div>
+        )}
+        <div className="preset-grid">
+          {RUNBOOKS.map((runbook) => {
+            const result = runbookResults[runbook.id];
+            const isHidden = runbookHidden[runbook.id];
+            return (
+              <div key={runbook.id} className="preset">
+                <div className="preset-title">{runbook.title}</div>
+                <div className="preset-desc">{runbook.desc}</div>
+                {runbook.note && (
+                  <div className="preset-note">{runbook.note}</div>
+                )}
+                <div className="actions">
+                  <button
+                    onClick={() => runRunbook(runbook.id)}
+                    disabled={runbookBusy || missingLabKey}
+                  >
+                    Run
+                  </button>
+                  <button
+                    onClick={() => clearRunbook(runbook.id)}
+                    disabled={runbookBusy || !result}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleRunbookHidden(runbook.id)}
+                  >
+                    {isHidden ? 'Show' : 'Hide'}
+                  </button>
+                </div>
+                {result?.steps?.length ? (
+                  isHidden ? (
+                    <div className="status">Results hidden.</div>
+                  ) : (
+                    <div className="step-list">
+                      {result.steps.map((step, index) => {
+                        const detail = [step.stdout?.trim(), step.stderr?.trim()]
+                          .filter(Boolean)
+                          .join('\n');
+                        return (
+                          <div
+                            key={`${runbook.id}-${index}`}
+                            className={`step-item ${step.ok ? 'ok' : 'fail'}`}
+                          >
+                            <div className="step-header">
+                              <div className="step-label">
+                                {index + 1}. {step.step}
+                              </div>
+                              <span
+                                className={`step-badge ${step.ok ? 'ok' : 'fail'}`}
+                              >
+                                {step.ok ? 'OK' : 'FAIL'}
+                              </span>
+                            </div>
+                            <div className="step-command">{step.command}</div>
+                            {detail && <pre className="step-output">{detail}</pre>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )
+                ) : (
+                  <div className="status">No results yet.</div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className="status">
+          {runbookStatus ||
+            'Pick a runbook to execute the corresponding manual steps.'}
         </div>
       </section>
       )}
@@ -3657,80 +4953,41 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
             </div>
           </div>
           <div className="preset">
-          <div className="preset-title">Aggressive NSEC Demo</div>
-          <div className="preset-desc">
-            Runs two NXDOMAIN queries; the second should be synthesized from cached
-            denial proofs.
-          </div>
-          <div className="preset-note">
-            This demo intentionally uses two non-existent names to validate
-            aggressive NSEC behavior. NXDOMAIN is expected.
-          </div>
-          <div className="actions">
-            <button onClick={runAggressiveNsecDemo} disabled={isBusy}>
-              Run Demo
-            </button>
-            <button
-              onClick={runAggressiveNsecProof}
-              disabled={isBusy || proofBusy || missingLabKey}
-            >
-              Run Demo + Proof
-            </button>
-            <button
-              onClick={runAggressiveNsecProofCold}
-              disabled={isBusy || proofBusy || missingLabKey}
-            >
-              Run Demo + Proof (Cold)
-            </button>
-            <button
-              onClick={() => proofCaptureFile && downloadCapture(proofCaptureFile)}
-              disabled={
-                isBusy || proofBusy || missingLabKey || !proofCaptureFile
-              }
-            >
-              Download PCAP
-            </button>
-            <button onClick={clearProofOutput} disabled={isBusy || proofBusy}>
-              Clear Proof
-            </button>
-          </div>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={proofColdCache}
-              onChange={(e) => {
-                setProofColdCache(e.target.checked);
-                if (e.target.checked) {
-                  setProofFlushCache(false);
+            <div className="preset-title">Aggressive NSEC Proof (Cold)</div>
+            <div className="preset-desc">
+              Runs two NXDOMAIN queries with a cold resolver cache and captures
+              authoritative traffic for verification.
+            </div>
+            <div className="preset-note">
+              This proof intentionally uses two non-existent names. NXDOMAIN is expected.
+            </div>
+            <div className="actions">
+              <button
+                onClick={runAggressiveNsecProofCold}
+                disabled={isBusy || proofBusy || missingLabKey}
+              >
+                Run Proof (Cold)
+              </button>
+              <button
+                onClick={() => proofCaptureFile && downloadCapture(proofCaptureFile)}
+                disabled={
+                  isBusy || proofBusy || missingLabKey || !proofCaptureFile
                 }
-              }}
-            />
-            Restart resolver (clear cache)
-          </label>
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={proofFlushCache}
-              onChange={(e) => {
-                setProofFlushCache(e.target.checked);
-                if (e.target.checked) {
-                  setProofColdCache(false);
-                }
-              }}
-            />
-            Flush resolver cache (example.test)
-          </label>
-        </div>
+              >
+                Download PCAP
+              </button>
+            </div>
+          </div>
       </div>
       <div className="status">
         {proofStatus ||
-          'Use "Run Demo + Proof" to capture authoritative traffic and count upstream queries.'}
+          'Run the cold proof to capture authoritative traffic and count upstream queries.'}
       </div>
       <pre className="output">{proofOutput || 'No proof output yet.'}</pre>
       </section>
       )}
 
-    {isSectionVisible('privacy') && (
+      {isSectionVisible('privacy') && (
     <section className="card" id="privacy">
       <div className="card-title">DNS Query Privacy</div>
       <div className="hint">
@@ -3970,6 +5227,483 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
     </section>
     )}
 
+    {isSectionVisible('scenarios') && (
+    <section className="card" id="scenarios">
+      <div className="card-title">Scenarios + Table Templates</div>
+      <div className="hint">
+        Use the scenarios below to configure the lab, run tests, and record results
+        directly into the comparison tables. Each scenario can be applied to prefill
+        key UI settings; some require you to click Apply Controls or switch signing.
+      </div>
+      <div className="scenario-grid">
+        {SCENARIOS.map((scenario) => (
+          <div
+            key={scenario.id}
+            className={`scenario-card ${
+              activeScenario === scenario.id ? 'active' : ''
+            }`}
+          >
+            <div className="scenario-title">
+              {scenario.label}
+              {activeScenario === scenario.id && (
+                <span className="scenario-pill">Applied</span>
+              )}
+            </div>
+            <div className="scenario-desc">{scenario.detail}</div>
+            <div className="scenario-note">{scenario.note}</div>
+            <button
+              type="button"
+              onClick={() => runScenario(scenario.id)}
+              disabled={scenarioBusy || isBusy || signingBusy || controlsBusy || missingLabKey}
+            >
+              Apply Scenario
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="status">
+        {scenarioStatus ||
+          'Apply a scenario, run the relevant tests (Availability, Perf, Amplification), then fill the tables.'}
+      </div>
+
+      <div className="table-header">
+        <div className="section-title">Wydajność i dostępność</div>
+        <button type="button" onClick={exportPerfCsv}>
+          Download CSV
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Konfiguracja</th>
+              <th>Availability (%)</th>
+              <th>Avg latency (ms)</th>
+              <th>p50 (ms)</th>
+              <th>p95 (ms)</th>
+              <th>p99 (ms)</th>
+              <th>QPS max</th>
+              <th>Baseline QPS</th>
+              <th>Error rate (%)</th>
+              <th>Cache hit (%)</th>
+              <th>NXDOMAIN (%)</th>
+              <th>SERVFAIL (%)</th>
+              <th>Upstream QPS</th>
+              <th>Uwagi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SCENARIOS.map((scenario) => (
+              <tr
+                key={`perf-${scenario.id}`}
+                className={activeScenario === scenario.id ? 'active' : ''}
+              >
+                <td>{scenario.label}</td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].availabilityPct}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'availabilityPct', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].avgLatency}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'avgLatency', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].p50}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'p50', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].p95}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'p95', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].p99}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'p99', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].qpsMax}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'qpsMax', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].baselineQps}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'baselineQps', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].errorRate}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'errorRate', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].cacheHit}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'cacheHit', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].nxdomain}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'nxdomain', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].servfail}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'servfail', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].upstreamQps}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'upstreamQps', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioPerfTable[scenario.id].notes}
+                    onChange={(e) =>
+                      updatePerfCell(scenario.id, 'notes', e.target.value)
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="table-header">
+        <div className="section-title">Zasoby i podatność na nadużycia</div>
+        <button type="button" onClick={exportResourceCsv}>
+          Download CSV
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Konfiguracja</th>
+              <th>CPU (%)</th>
+              <th>RAM (MB)</th>
+              <th>Mem (%)</th>
+              <th>Rate-limited (%)</th>
+              <th>Upstream QPS</th>
+              <th>Amplifikacja UDP (B)</th>
+              <th>Amplifikacja TCP (B)</th>
+              <th>Avg UDP (B)</th>
+              <th>Avg TCP (B)</th>
+              <th>TC rate (%)</th>
+              <th>TCP fallback (%)</th>
+              <th>Uwagi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SCENARIOS.map((scenario) => (
+              <tr
+                key={`resource-${scenario.id}`}
+                className={activeScenario === scenario.id ? 'active' : ''}
+              >
+                <td>{scenario.label}</td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].cpu}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'cpu', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].ram}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'ram', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].memPct}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'memPct', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].ratelimitedPct}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'ratelimitedPct', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].upstreamQps}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'upstreamQps', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].amplificationUdp}
+                    onChange={(e) =>
+                      updateResourceCell(
+                        scenario.id,
+                        'amplificationUdp',
+                        e.target.value
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].amplificationTcp}
+                    onChange={(e) =>
+                      updateResourceCell(
+                        scenario.id,
+                        'amplificationTcp',
+                        e.target.value
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].avgUdpSize}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'avgUdpSize', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].avgTcpSize}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'avgTcpSize', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].tcRate}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'tcRate', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].tcpRate}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'tcpRate', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioResourceTable[scenario.id].notes}
+                    onChange={(e) =>
+                      updateResourceCell(scenario.id, 'notes', e.target.value)
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="table-header">
+        <div className="section-title">Bezpieczeństwo i poprawność</div>
+        <button type="button" onClick={exportSecurityCsv}>
+          Download CSV
+        </button>
+      </div>
+      <div className="table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Konfiguracja</th>
+              <th>DNSSEC OK (%)</th>
+              <th>BOGUS (%)</th>
+              <th>DoT success (%)</th>
+              <th>DoH success (%)</th>
+              <th>Cert errors (%)</th>
+              <th>QNAME minimization</th>
+              <th>ECS leakage</th>
+              <th>Uwagi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {SCENARIOS.map((scenario) => (
+              <tr
+                key={`security-${scenario.id}`}
+                className={activeScenario === scenario.id ? 'active' : ''}
+              >
+                <td>{scenario.label}</td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].dnssecOkPct}
+                    onChange={(e) =>
+                      updateSecurityCell(scenario.id, 'dnssecOkPct', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].bogusPct}
+                    onChange={(e) =>
+                      updateSecurityCell(scenario.id, 'bogusPct', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].dotSuccessPct}
+                    onChange={(e) =>
+                      updateSecurityCell(
+                        scenario.id,
+                        'dotSuccessPct',
+                        e.target.value
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].dohSuccessPct}
+                    onChange={(e) =>
+                      updateSecurityCell(
+                        scenario.id,
+                        'dohSuccessPct',
+                        e.target.value
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].certErrorsPct}
+                    onChange={(e) =>
+                      updateSecurityCell(
+                        scenario.id,
+                        'certErrorsPct',
+                        e.target.value
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].qnameMin}
+                    onChange={(e) =>
+                      updateSecurityCell(scenario.id, 'qnameMin', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].ecsLeakage}
+                    onChange={(e) =>
+                      updateSecurityCell(scenario.id, 'ecsLeakage', e.target.value)
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    className="data-input"
+                    value={scenarioSecurityTable[scenario.id].notes}
+                    onChange={(e) =>
+                      updateSecurityCell(scenario.id, 'notes', e.target.value)
+                    }
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="section-title">5.6. Analiza efektywności</div>
+      <textarea
+        className="analysis-notes"
+        value={analysisNotes}
+        onChange={(e) => setAnalysisNotes(e.target.value)}
+        placeholder="Wnioski, obserwacje, porównania scenariuszy..."
+      />
+    </section>
+    )}
+
       {isSectionVisible('email') && (
       <section className="card" id="email">
         <div className="card-title">Mail Delivery Lab</div>
@@ -3979,8 +5713,8 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
             results in the mail logs.
           </div>
           <div>
-            Create a mailbox first:{' '}
-            <code>docker compose exec mailserver setup email add user@example.test</code>
+            Create a mailbox below (or run{' '}
+            <code>docker compose exec mailserver setup email add user@example.test</code>).
           </div>
         </div>
         {missingLabKey && (
@@ -3990,196 +5724,356 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
             <code>docker-compose.yml</code>.
           </div>
         )}
-        <div className="grid">
-          <label>
-            From
-            <input
-              value={emailFrom}
-              onChange={(e) => setEmailFrom(e.target.value)}
-              disabled={emailBusy}
-            />
-          </label>
-          <label>
-            To
-            <input
-              value={emailTo}
-              onChange={(e) => setEmailTo(e.target.value)}
-              disabled={emailBusy}
-            />
-          </label>
-          <label>
-            Server
-            <input
-              value={emailServer}
-              onChange={(e) => setEmailServer(e.target.value)}
-              disabled={emailBusy}
-            />
-          </label>
-          <label>
-            Port
-            <input
-              type="number"
-              min={1}
-              max={65535}
-              value={emailPort}
-              onChange={(e) => setEmailPort(Number(e.target.value))}
-              disabled={emailBusy}
-            />
-          </label>
-        </div>
-        <div className="grid">
-          <label>
-            TLS mode
-            <select
-              value={emailTlsMode}
-              onChange={(e) => setEmailTlsMode(e.target.value as EmailTlsMode)}
-              disabled={emailBusy}
-            >
-              <option value="none">None (port 25)</option>
-              <option value="starttls">STARTTLS (port 587)</option>
-              <option value="tls">TLS (port 465)</option>
-            </select>
-          </label>
-          <label>
-            Subject
-            <input
-              value={emailSubject}
-              onChange={(e) => setEmailSubject(e.target.value)}
-              disabled={emailBusy}
-            />
-          </label>
-        </div>
-        <label>
-          Body
-          <textarea
-            value={emailBody}
-            onChange={(e) => setEmailBody(e.target.value)}
-            disabled={emailBusy}
-          />
-        </label>
-        <div className="toggle-row">
-          <label className="pill-toggle">
-            <input
-              type="checkbox"
-              checked={emailUseAuth}
-              onChange={(e) => setEmailUseAuth(e.target.checked)}
-              disabled={emailBusy}
-            />
-            SMTP auth
-          </label>
-        </div>
-        <div className="grid">
-          <label>
-            Auth user
-            <input
-              value={emailAuthUser}
-              onChange={(e) => setEmailAuthUser(e.target.value)}
-              disabled={emailBusy || !emailUseAuth}
-            />
-          </label>
-          <label>
-            Auth password
-            <input
-              type="password"
-              value={emailAuthPass}
-              onChange={(e) => setEmailAuthPass(e.target.value)}
-              disabled={emailBusy || !emailUseAuth}
-            />
-          </label>
-          <label>
-            Auth type
-            <select
-              value={emailAuthType}
-              onChange={(e) => setEmailAuthType(e.target.value as EmailAuthType)}
-              disabled={emailBusy || !emailUseAuth}
-            >
-              <option value="AUTO">AUTO</option>
-              <option value="LOGIN">LOGIN</option>
-              <option value="PLAIN">PLAIN</option>
-              <option value="CRAM-MD5">CRAM-MD5</option>
-            </select>
-          </label>
-          <label>
-            Log filter
-            <input
-              value={emailLogFilter}
-              onChange={(e) => setEmailLogFilter(e.target.value)}
-              disabled={emailBusy}
-            />
-          </label>
-          <label>
-            Log tail (lines)
-            <input
-              type="number"
-              min={10}
-              max={1000}
-              value={emailLogTail}
-              onChange={(e) => setEmailLogTail(Number(e.target.value))}
-              disabled={emailBusy}
-            />
-          </label>
-          <label>
-            IMAP mailbox
-            <input
-              value={emailImapMailbox}
-              onChange={(e) => setEmailImapMailbox(e.target.value)}
-              disabled={emailBusy}
-            />
-          </label>
-          <label>
-            IMAP lines
-            <input
-              type="number"
-              min={5}
-              max={200}
-              value={emailImapLimit}
-              onChange={(e) => setEmailImapLimit(Number(e.target.value))}
-              disabled={emailBusy}
-            />
-          </label>
-        </div>
-        <div className="actions">
-          <button onClick={sendEmail} disabled={emailBusy || missingLabKey}>
-            Send Email
-          </button>
-          <button onClick={() => loadEmailLogs()} disabled={emailBusy || missingLabKey}>
-            Load Mail Logs
-          </button>
-          <button
-            onClick={() => {
-              setEmailLogFilter('dkim');
-              loadEmailLogs('dkim');
-            }}
-            disabled={emailBusy || missingLabKey}
-          >
-            Load DKIM Logs
-          </button>
-          <button onClick={checkImap} disabled={emailBusy || missingLabKey}>
-            Check IMAP
-          </button>
+        <div className="mail-layout">
+          <div className="mail-stack">
+            <div className="mail-card">
+              <div className="mail-card-title">Mailbox setup</div>
+              <div className="mail-card-sub">
+                Create a mailbox in the mail server to receive messages.
+              </div>
+              <div className="grid">
+                <label>
+                  Mailbox address
+                  <input
+                    value={emailUserAddress}
+                    onChange={(e) => setEmailUserAddress(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  Mailbox password
+                  <input
+                    type="password"
+                    value={emailUserPassword}
+                    onChange={(e) => setEmailUserPassword(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+              </div>
+              <div className="actions">
+                <button onClick={createMailbox} disabled={emailBusy || missingLabKey}>
+                  Create Mailbox
+                </button>
+                <button
+                  onClick={updateMailboxPassword}
+                  disabled={emailBusy || missingLabKey}
+                >
+                  Update Password
+                </button>
+                <button
+                  className="button-danger"
+                  onClick={deleteMailbox}
+                  disabled={emailBusy || missingLabKey}
+                >
+                  Delete Mailbox
+                </button>
+              </div>
+              <pre className="output compact">
+                {emailUserOutput || 'No mailbox actions yet.'}
+              </pre>
+            </div>
+
+            <div className="mail-card">
+              <div className="mail-card-title">Compose &amp; Send</div>
+              <div className="grid">
+                <label>
+                  From
+                  <input
+                    value={emailFrom}
+                    onChange={(e) => setEmailFrom(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  To
+                  <input
+                    value={emailTo}
+                    onChange={(e) => setEmailTo(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  Server
+                  <input
+                    value={emailServer}
+                    onChange={(e) => setEmailServer(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  Port
+                  <input
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={emailPort}
+                    onChange={(e) => setEmailPort(Number(e.target.value))}
+                    disabled={emailBusy}
+                  />
+                </label>
+              </div>
+              <div className="grid">
+                <label>
+                  TLS mode
+                  <select
+                    value={emailTlsMode}
+                    onChange={(e) =>
+                      setEmailTlsMode(e.target.value as EmailTlsMode)
+                    }
+                    disabled={emailBusy}
+                  >
+                    <option value="none">None (port 25)</option>
+                    <option value="starttls">STARTTLS (port 587)</option>
+                    <option value="tls">TLS (port 465)</option>
+                  </select>
+                </label>
+                <label>
+                  Subject
+                  <input
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+              </div>
+              <label>
+                Body
+                <textarea
+                  value={emailBody}
+                  onChange={(e) => setEmailBody(e.target.value)}
+                  disabled={emailBusy}
+                />
+              </label>
+              <div className="toggle-row">
+                <label className="pill-toggle">
+                  <input
+                    type="checkbox"
+                    checked={emailUseAuth}
+                    onChange={(e) => setEmailUseAuth(e.target.checked)}
+                    disabled={emailBusy}
+                  />
+                  SMTP auth
+                </label>
+              </div>
+              <div className="grid">
+                <label>
+                  Auth user
+                  <input
+                    value={emailAuthUser}
+                    onChange={(e) => setEmailAuthUser(e.target.value)}
+                    disabled={emailBusy || !emailUseAuth}
+                  />
+                </label>
+                <label>
+                  Auth password
+                  <input
+                    type="password"
+                    value={emailAuthPass}
+                    onChange={(e) => setEmailAuthPass(e.target.value)}
+                    disabled={emailBusy || !emailUseAuth}
+                  />
+                </label>
+                <label>
+                  Auth type
+                  <select
+                    value={emailAuthType}
+                    onChange={(e) => setEmailAuthType(e.target.value as EmailAuthType)}
+                    disabled={emailBusy || !emailUseAuth}
+                  >
+                    <option value="AUTO">AUTO</option>
+                    <option value="LOGIN">LOGIN</option>
+                    <option value="PLAIN">PLAIN</option>
+                    <option value="CRAM-MD5">CRAM-MD5</option>
+                  </select>
+                </label>
+              </div>
+              <div className="actions">
+                <button onClick={sendEmail} disabled={emailBusy || missingLabKey}>
+                  Send Email
+                </button>
+              </div>
+              <pre className="output compact">
+                {emailOutput || 'No send output yet.'}
+              </pre>
+            </div>
+          </div>
+
+          <div className="mail-stack">
+            <div className="mail-card">
+              <div className="mail-card-title">Inbox (IMAP)</div>
+              <div className="mail-card-sub">
+                List incoming messages and preview a selected mail.
+              </div>
+              <div className="grid">
+                <label>
+                  IMAP user
+                  <input
+                    value={emailImapUser}
+                    onChange={(e) => setEmailImapUser(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  IMAP mailbox
+                  <input
+                    value={emailImapMailbox}
+                    onChange={(e) => setEmailImapMailbox(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  Message limit
+                  <input
+                    type="number"
+                    min={5}
+                    max={200}
+                    value={emailImapLimit}
+                    onChange={(e) => setEmailImapLimit(Number(e.target.value))}
+                    disabled={emailBusy}
+                  />
+                </label>
+              </div>
+              <div className="actions">
+                <button
+                  onClick={loadInboxList}
+                  disabled={emailBusy || missingLabKey}
+                >
+                  List Messages
+                </button>
+                <button
+                  onClick={() => viewInboxMessage(null)}
+                  disabled={
+                    emailBusy || missingLabKey || !emailInboxSelected
+                  }
+                >
+                  View Selected
+                </button>
+              </div>
+              <div className="inbox-list">
+                {emailInboxMessages.length > 0 ? (
+                  emailInboxMessages.map((msg) => {
+                    const isActive =
+                      emailInboxSelected?.id === msg.id &&
+                      emailInboxSelected?.source === msg.source;
+                    return (
+                      <button
+                        type="button"
+                        key={`${msg.source}:${msg.id}`}
+                        className={`inbox-item ${isActive ? 'active' : ''}`}
+                        onClick={() => {
+                          setEmailInboxSelected(msg);
+                          viewInboxMessage(msg);
+                        }}
+                        disabled={emailBusy}
+                      >
+                        <div className="inbox-item-subject">
+                          {msg.subject || '(no subject)'}
+                        </div>
+                        <div className="inbox-item-meta">
+                          <span>{msg.from_addr || 'unknown sender'}</span>
+                          <span>{msg.date || 'unknown date'}</span>
+                        </div>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="inbox-empty">No messages loaded yet.</div>
+                )}
+              </div>
+              <div className="inbox-viewer">
+                <div className="inbox-viewer-meta">
+                  {emailInboxSelected ? (
+                    <>
+                      <div>
+                        <strong>Subject:</strong>{' '}
+                        {emailInboxSelected.subject || '(no subject)'}
+                      </div>
+                      <div>
+                        <strong>From:</strong>{' '}
+                        {emailInboxSelected.from_addr || 'unknown sender'}
+                      </div>
+                      <div>
+                        <strong>To:</strong>{' '}
+                        {emailInboxSelected.to_addr || 'unknown recipient'}
+                      </div>
+                      <div>
+                        <strong>Date:</strong>{' '}
+                        {emailInboxSelected.date || 'unknown date'}
+                      </div>
+                    </>
+                  ) : (
+                    <div>No message selected.</div>
+                  )}
+                </div>
+                <pre className="output compact">
+                  {emailInboxContent || 'Select a message to view.'}
+                </pre>
+              </div>
+              {emailInboxRaw && (
+                <pre className="output compact">{emailInboxRaw}</pre>
+              )}
+            </div>
+
+            <div className="mail-card">
+              <div className="mail-card-title">Outbox / Logs</div>
+              <div className="mail-card-sub">
+                Tail delivery logs for DKIM/SPF and SMTP status.
+              </div>
+              <div className="grid">
+                <label>
+                  Log filter
+                  <input
+                    value={emailLogFilter}
+                    onChange={(e) => setEmailLogFilter(e.target.value)}
+                    disabled={emailBusy}
+                  />
+                </label>
+                <label>
+                  Log tail (lines)
+                  <input
+                    type="number"
+                    min={10}
+                    max={1000}
+                    value={emailLogTail}
+                    onChange={(e) => setEmailLogTail(Number(e.target.value))}
+                    disabled={emailBusy}
+                  />
+                </label>
+              </div>
+              <div className="actions">
+                <button
+                  onClick={() => loadEmailLogs()}
+                  disabled={emailBusy || missingLabKey}
+                >
+                  Load Logs
+                </button>
+                <button
+                  onClick={() => {
+                    setEmailLogFilter('postfix');
+                    loadEmailLogs('postfix');
+                  }}
+                  disabled={emailBusy || missingLabKey}
+                >
+                  Load Postfix
+                </button>
+                <button
+                  onClick={() => {
+                    setEmailLogFilter('dkim');
+                    loadEmailLogs('dkim');
+                  }}
+                  disabled={emailBusy || missingLabKey}
+                >
+                  Load DKIM
+                </button>
+              </div>
+              <div className="email-log-meta">
+                {emailLogFile ? `File: ${emailLogFile}` : 'No log loaded.'}
+              </div>
+              <pre className="output compact">{emailLog || 'No log output yet.'}</pre>
+            </div>
+          </div>
         </div>
         <div className="status">{emailStatus || 'Ready.'}</div>
-        <div className="email-panels">
-          <div className="email-panel">
-            <div className="section-title">Send Output</div>
-            <pre className="output compact">
-              {emailOutput || 'No send output yet.'}
-            </pre>
-          </div>
-          <div className="email-panel">
-            <div className="section-title">Mail Log Tail</div>
-            <div className="email-log-meta">
-              {emailLogFile ? `File: ${emailLogFile}` : 'No log loaded.'}
-            </div>
-            <pre className="output compact">{emailLog || 'No log output yet.'}</pre>
-          </div>
-          <div className="email-panel">
-            <div className="section-title">IMAP Headers</div>
-            <pre className="output compact">
-              {emailImapOutput || 'No IMAP output yet.'}
-            </pre>
-          </div>
-        </div>
       </section>
       )}
 
@@ -4381,7 +6275,7 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
           <button onClick={runWarmup} disabled={warmupBusy || missingLabKey}>
             Warm-up (short)
           </button>
-          <button onClick={runBaseline} disabled={baselineBusy || missingLabKey}>
+          <button onClick={() => runBaseline()} disabled={baselineBusy || missingLabKey}>
             Run Baseline
           </button>
           <button
@@ -4767,7 +6661,7 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
           </label>
         </div>
         <div className="actions">
-          <button onClick={runDnsperf} disabled={dnsperfBusy || missingLabKey}>
+          <button onClick={() => runDnsperf()} disabled={dnsperfBusy || missingLabKey}>
             Run dnsperf
           </button>
         </div>
@@ -5190,7 +7084,7 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
           <button onClick={loadControls} disabled={controlsBusy || missingLabKey}>
             Load Controls
           </button>
-          <button onClick={applyControls} disabled={controlsBusy || missingLabKey}>
+          <button onClick={() => applyControls()} disabled={controlsBusy || missingLabKey}>
             Apply Controls
           </button>
         </div>
@@ -5287,7 +7181,10 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
           </div>
         </div>
         <div className="actions">
-          <button onClick={runAmplificationTest} disabled={ampBusy || missingLabKey}>
+          <button
+            onClick={() => runAmplificationTest()}
+            disabled={ampBusy || missingLabKey}
+          >
             Run Amplification Test
           </button>
         </div>

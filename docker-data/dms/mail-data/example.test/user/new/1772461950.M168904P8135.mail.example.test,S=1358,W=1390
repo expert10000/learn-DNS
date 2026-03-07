@@ -1,0 +1,32 @@
+Return-Path: <user@example.test>
+Delivered-To: user@example.test
+Received: from mail.example.test
+	by mail.example.test with LMTP
+	id vG3eCX6fpWnHHwAAUi6ngw
+	(envelope-from <user@example.test>)
+	for <user@example.test>; Mon, 02 Mar 2026 14:32:30 +0000
+Received: from localhost (localhost [127.0.0.1])
+	by mail.example.test (Postfix) with ESMTP id 247501BC575
+	for <user@example.test>; Mon,  2 Mar 2026 14:32:30 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=example.test; s=mail;
+	t=1772461949; bh=cDStRCDLpuiPakz5yUxOSH2hj3fYaMx1zXaLW4Dc0FE=;
+	h=To:From:Subject;
+	b=XvhTKFpsmgXEfw8Ii/8g9zldz33k7TKwh9/jnstXS0WMfupnWNV3uDfKdTA6u0Ofy
+	 8o+fJf9ojGShS8h4RootLi6xHn23BJ9TiR+gXJWj+Z+Mr6AW4+IioWHzzWR+zI7ucZ
+	 M+IKqXbscEET4EqXTxa7JEy/Y/9SJcEYLo/mNTZh7QxUsVGrND7Unqe1MPDAncr7B3
+	 S4q1ORQvJuRE8nDTRI4Vt29rTPCVHq31EYkw4oWm+nMrLgIxLT1nfHpeIs573Wgpj9
+	 c7DMQa1T6OSiY/xXSNqZhrLvH2V4GqBkmbyCMy8eBufu7kh6uil1WPq+W5cS7Zfeqk
+	 X7oQ+C9kLdQeA==
+Received: from 8b7db4a6a7e8 (dns_swaks.dns-security-lab_client_net [172.32.0.26])
+	by mail.example.test (Postfix) with ESMTP id E71261BC556
+	for <user@example.test>; Mon,  2 Mar 2026 14:32:29 +0000 (UTC)
+Date: Mon, 02 Mar 2026 14:32:29 +0000
+To: user@example.test
+From: user@example.test
+Subject: DNS lab test
+X-MS-Reactions: disallow
+Message-Id: <20260302143229.000019@8b7db4a6a7e8>
+
+Hello from the DNS lab.
+
+

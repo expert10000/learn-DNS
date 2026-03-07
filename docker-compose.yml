@@ -122,7 +122,7 @@ services:
       - "127.0.0.1:1143:143"
       - "127.0.0.1:1993:993"
     volumes:
-      - ./docker-data/dms/mail-data/:/var/mail/
+      - mailserver_mail:/var/mail/
       - mailserver_state:/var/mail-state/
       - ./docker-data/dms/mail-logs/:/var/log/mail/
       - ./docker-data/dms/config/:/tmp/docker-mailserver/
@@ -509,6 +509,7 @@ services:
 
 volumes:
   portainer_data:
+  mailserver_mail:
   mailserver_state:
 
 networks:
