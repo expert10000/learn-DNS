@@ -544,6 +544,69 @@ services:
       retries: 5
       start_period: 20s
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.2
+    container_name: dns_elasticsearch
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "elasticsearch"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    networks:
+      observability_net:
+        ipv4_address: 172.35.0.20
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    mem_limit: 1g
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.12.2
+    container_name: dns_kibana
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "kibana"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SECURITY_ENABLED=false
+      - SERVER_HOST=0.0.0.0
+    networks:
+      observability_net:
+        ipv4_address: 172.35.0.21
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      - elasticsearch
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.2
+    container_name: dns_filebeat
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "filebeat"
+    user: root
+    command: ["--strict.perms=false"]
+    networks:
+      observability_net:
+        ipv4_address: 172.35.0.22
+    depends_on:
+      - elasticsearch
+      - kibana
+    volumes:
+      - ./observability/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./bind9/log:/logs/bind_child:ro
+      - ./bind9_parent/log:/logs/bind_parent:ro
+      - ./unbound/log:/logs/unbound:ro
+      - ./unbound/log_plain:/logs/unbound_plain:ro
+      - ./lab_api/log:/logs/lab_api:ro
+
   # -------------------------
   # Option 2: ONE management API for React (logs + optional dig)
   # Optional: logs/management endpoints. React uses per-client APIs by default.
@@ -855,6 +918,7 @@ volumes:
   mailserver_state:
   prometheus_data:
   grafana_data:
+  elasticsearch_data:
 
 networks:
   mgmt_net:

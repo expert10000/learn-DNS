@@ -64,6 +64,12 @@ Authoritative DNS metrics:
 Logging baseline:
 - Unbound and BIND logs include consistent timestamps/identity; filters and locations in `docs/observability.md`.
 
+ELK logs:
+- Kibana is available at `http://127.0.0.1:5601` with a data view export in `observability/kibana/saved_objects.ndjson`.
+
+Correlation:
+- Grafana dashboards include links to Kibana Discover for the same time range.
+
 docker compose up -d --build
 
 Quick start:

@@ -57,6 +57,39 @@ Grafana dashboard:
 Dashboard JSON:
 - `observability/grafana/dashboards/dns-bind-authoritative.json`
 
+## ELK (Logs in Kibana)
+Minimal single-node ELK stack:
+- `elasticsearch` (single-node, memory limited)
+- `kibana`
+- `filebeat` (reads DNS logs and ships to Elasticsearch)
+
+Access:
+- Elasticsearch: `http://127.0.0.1:9200`
+- Kibana: `http://127.0.0.1:5601`
+
+Log inputs (via Filebeat):
+- BIND parent/child: `bind9_parent/log/*.log`, `bind9/log/*.log`
+- Unbound valid/plain: `unbound/log/unbound.log`, `unbound/log_plain/unbound.log`
+- Lab API: `lab_api/log/*.log`
+
+Kibana saved objects export:
+- `observability/kibana/saved_objects.ndjson` (data view `dns-lab-logs-*`)
+
+Import it in Kibana:
+1. Stack Management → Saved Objects → Import.
+2. Select `observability/kibana/saved_objects.ndjson`.
+3. Open Discover and choose the `dns-lab-logs-*` data view.
+
+## Correlation (Grafana → Kibana)
+Grafana dashboards include links that preserve the current time range and open
+Kibana Discover:
+- Resolver dashboard links to resolver logs.
+- Authoritative dashboard links to parent/child logs.
+
+Saved searches (imported from the same NDJSON):
+- **DNSSEC Validation Failures**
+- **NXDOMAIN Flood**
+
 ## Logging Baseline (DNSSEC / SERVFAIL / NSEC)
 Log locations:
 - Unbound (validating): `unbound/log/unbound.log`

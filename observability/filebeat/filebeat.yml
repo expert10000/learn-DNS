@@ -1,0 +1,71 @@
+filebeat.inputs:
+  - type: log
+    id: bind_parent
+    enabled: true
+    paths:
+      - /logs/bind_parent/*.log
+    fields_under_root: true
+    fields:
+      service: bind
+      role: authoritative_parent
+      log_type: bind
+
+  - type: log
+    id: bind_child
+    enabled: true
+    paths:
+      - /logs/bind_child/*.log
+    fields_under_root: true
+    fields:
+      service: bind
+      role: authoritative_child
+      log_type: bind
+
+  - type: log
+    id: unbound_validating
+    enabled: true
+    paths:
+      - /logs/unbound/unbound.log
+    fields_under_root: true
+    fields:
+      service: unbound
+      role: resolver
+      log_type: unbound
+
+  - type: log
+    id: unbound_plain
+    enabled: true
+    paths:
+      - /logs/unbound_plain/unbound.log
+    fields_under_root: true
+    fields:
+      service: unbound
+      role: resolver_plain
+      log_type: unbound
+
+  - type: log
+    id: lab_api
+    enabled: true
+    paths:
+      - /logs/lab_api/*.log
+    fields_under_root: true
+    fields:
+      service: lab_api
+      role: control
+      log_type: app
+
+setup.ilm.enabled: false
+setup.template.enabled: true
+setup.template.name: "dns-lab-logs"
+setup.template.pattern: "dns-lab-logs-*"
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "dns-lab-logs-%{+yyyy.MM.dd}"
+
+setup.kibana:
+  host: "http://kibana:5601"
+
+processors:
+  - add_host_metadata:
+      when.not.contains.tags: forwarded

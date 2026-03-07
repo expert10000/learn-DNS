@@ -526,3 +526,15 @@ support filtering of DNSSEC/SERVFAIL/NSEC events.
 
 Log locations and example filters:
 - `docs/observability.md`
+
+## Observability (Kibana Logs)
+Kibana provides centralized log search for resolver and authoritative logs.
+
+Details and data view export:
+- `docs/observability.md`
+
+## Observability (Correlation)
+Grafana dashboards link directly to Kibana Discover with the active time range.
+
+Saved searches for validation failures and NXDOMAIN floods are included in:
+- `observability/kibana/saved_objects.ndjson`

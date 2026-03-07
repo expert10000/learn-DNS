@@ -10,6 +10,20 @@
     "from": "now-15m",
     "to": "now"
   },
+  "links": [
+    {
+      "type": "link",
+      "title": "Kibana Logs (Resolver)",
+      "url": "http://localhost:5601/app/discover#/?_g=(time:(from:'${__from:date:iso}',to:'${__to:date:iso}'))&_a=(query:(language:kuery,query:'role:resolver'))",
+      "targetBlank": true
+    },
+    {
+      "type": "link",
+      "title": "Kibana Logs (Resolver Plain)",
+      "url": "http://localhost:5601/app/discover#/?_g=(time:(from:'${__from:date:iso}',to:'${__to:date:iso}'))&_a=(query:(language:kuery,query:'role:resolver_plain'))",
+      "targetBlank": true
+    }
+  ],
   "panels": [
     {
       "id": 10,

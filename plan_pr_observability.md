@@ -23,3 +23,5 @@ Poniższa lista opisuje rekomendowaną kolejność Pull Requestów dla rozbudowy
 - PR 3: implemented (Unbound exporters + Resolver DNS stats dashboard).
 - PR 4: implemented (BIND exporters + Authoritative stats dashboard).
 - PR 5: implemented (structured logging baseline + filters/examples).
+- PR 6: implemented (ELK single-node + Filebeat + Kibana data view export).
+- PR 7: implemented (Grafana links to Kibana + saved searches).

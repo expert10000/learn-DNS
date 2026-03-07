@@ -10,6 +10,14 @@
     "from": "now-15m",
     "to": "now"
   },
+  "links": [
+    {
+      "type": "link",
+      "title": "Kibana Logs (All DNS Lab)",
+      "url": "http://localhost:5601/app/discover#/?_g=(time:(from:'${__from:date:iso}',to:'${__to:date:iso}'))&_a=(query:(language:kuery,query:'service:bind or service:unbound or service:lab_api'))",
+      "targetBlank": true
+    }
+  ],
   "panels": [
     {
       "id": 1,

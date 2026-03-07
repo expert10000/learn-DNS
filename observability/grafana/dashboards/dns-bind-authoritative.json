@@ -10,6 +10,20 @@
     "from": "now-15m",
     "to": "now"
   },
+  "links": [
+    {
+      "type": "link",
+      "title": "Kibana Logs (Authoritative Parent)",
+      "url": "http://localhost:5601/app/discover#/?_g=(time:(from:'${__from:date:iso}',to:'${__to:date:iso}'))&_a=(query:(language:kuery,query:'role:authoritative_parent'))",
+      "targetBlank": true
+    },
+    {
+      "type": "link",
+      "title": "Kibana Logs (Authoritative Child)",
+      "url": "http://localhost:5601/app/discover#/?_g=(time:(from:'${__from:date:iso}',to:'${__to:date:iso}'))&_a=(query:(language:kuery,query:'role:authoritative_child'))",
+      "targetBlank": true
+    }
+  ],
   "panels": [
     {
       "id": 20,
