@@ -519,3 +519,10 @@ What you get in Grafana:
 
 Details and exported dashboards:
 - `docs/observability.md`
+
+## Observability (Logging Baseline)
+Unbound and BIND logs are formatted with consistent timestamps and identities to
+support filtering of DNSSEC/SERVFAIL/NSEC events.
+
+Log locations and example filters:
+- `docs/observability.md`

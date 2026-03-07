@@ -25,6 +25,7 @@ services:
         ipv4_address: 172.31.0.10
     volumes:
       - ./bind9_parent/named.conf:/etc/bind/named.conf:ro
+      - ./bind9_parent/rndc.key:/etc/bind/rndc.key:ro
       - ./bind9_parent/zones:/etc/bind/zones
       - ./bind9_parent/keys:/etc/bind/keys
       - ./bind9_parent/log:/var/log/bind
@@ -50,6 +51,7 @@ services:
         ipv4_address: 172.31.0.11
     volumes:
       - ./bind9/named.conf:/etc/bind/named.conf:ro
+      - ./bind9/rndc.key:/etc/bind/rndc.key:ro
       - ./bind9/zones:/etc/bind/zones
       - ./bind9/keys:/etc/bind/keys
       - ./bind9/log:/var/log/bind
@@ -473,6 +475,70 @@ services:
       - ./unbound/control_plain:/opt/unbound/etc/unbound/control:ro
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9167/metrics', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  bind_exporter_parent:
+    build: ./bind_exporter
+    container_name: dns_bind_exporter_parent
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "bind_exporter_parent"
+    environment:
+      - BIND_STATS_FILE=/var/log/bind/named.stats
+      - BIND_RNDC_CONF=/etc/bind/rndc.conf
+      - BIND_RNDC_SERVER=172.31.0.10
+      - BIND_RNDC_PORT=953
+      - BIND_SERVER_NAME=authoritative_parent
+      - PORT=9119
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.13
+      dns_core:
+        ipv4_address: 172.31.0.13
+    depends_on:
+      - authoritative_parent
+    volumes:
+      - ./bind9_parent/log:/var/log/bind:ro
+      - ./bind9_parent/rndc.conf:/etc/bind/rndc.conf:ro
+      - ./bind9_parent/rndc.key:/etc/bind/rndc.key:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9119/metrics', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  bind_exporter_child:
+    build: ./bind_exporter
+    container_name: dns_bind_exporter_child
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "bind_exporter_child"
+    environment:
+      - BIND_STATS_FILE=/var/log/bind/named.stats
+      - BIND_RNDC_CONF=/etc/bind/rndc.conf
+      - BIND_RNDC_SERVER=172.31.0.11
+      - BIND_RNDC_PORT=953
+      - BIND_SERVER_NAME=authoritative_child
+      - PORT=9119
+    networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.14
+      dns_core:
+        ipv4_address: 172.31.0.14
+    depends_on:
+      - authoritative_child
+    volumes:
+      - ./bind9/log:/var/log/bind:ro
+      - ./bind9/rndc.conf:/etc/bind/rndc.conf:ro
+      - ./bind9/rndc.key:/etc/bind/rndc.key:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9119/metrics', timeout=2).read()\""]
       interval: 30s
       timeout: 5s
       retries: 5

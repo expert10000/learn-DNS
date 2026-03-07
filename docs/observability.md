@@ -41,6 +41,41 @@ Grafana dashboard:
 Dashboard JSON:
 - `observability/grafana/dashboards/dns-unbound-stats.json`
 
+## BIND Metrics (Authoritative Stats)
+Authoritative servers export stats via `rndc stats` to `named.stats` and a
+lightweight exporter parses the file.
+
+Exporters:
+- `dns_bind_exporter_parent` (authoritative parent)
+- `dns_bind_exporter_child` (authoritative child)
+
+Prometheus job: `bind` (targets `172.30.0.13:9119`, `172.30.0.14:9119`).
+
+Grafana dashboard:
+- **Authoritative Stats** – queries per second and response codes.
+
+Dashboard JSON:
+- `observability/grafana/dashboards/dns-bind-authoritative.json`
+
+## Logging Baseline (DNSSEC / SERVFAIL / NSEC)
+Log locations:
+- Unbound (validating): `unbound/log/unbound.log`
+- Unbound (plain): `unbound/log_plain/unbound.log`
+- BIND parent: `bind9_parent/log/named.log`
+- BIND child: `bind9/log/named.log`
+
+Suggested filters:
+- DNSSEC / validation: `grep -Ei "dnssec|validation|trust anchor|key"`  
+- SERVFAIL: `grep -Ei "servfail"`  
+- NSEC / NSEC3: `grep -Ei "nsec|nsec3|aggressive"`  
+
+Example (representative) lines you should see after running validation tests:
+```
+2026-03-07T19:41:12Z dns_resolver[24]: info: validation success example.test. A
+2026-03-07T19:41:14Z dns_resolver[24]: info: SERVFAIL for bad.example.test. (validation failure)
+2026-03-07T19:41:15Z dns_authoritative_child[1]: info: client @0x7f... query: nope.example.test IN A +E(0)K (NSEC)
+```
+
 ## Quick Start
 1. `docker compose up -d --build`
 2. Open Grafana and verify the **DNS Lab Containers** dashboard is populated.

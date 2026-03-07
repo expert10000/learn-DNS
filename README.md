@@ -58,6 +58,12 @@ Details and dashboard export:
 Resolver DNS metrics:
 - Unbound stats are exported by sidecars and visualized in Grafana (dashboard **Resolver DNS Stats**).
 
+Authoritative DNS metrics:
+- BIND stats are exported by sidecars and visualized in Grafana (dashboard **Authoritative Stats**).
+
+Logging baseline:
+- Unbound and BIND logs include consistent timestamps/identity; filters and locations in `docs/observability.md`.
+
 docker compose up -d --build
 
 Quick start:

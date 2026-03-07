@@ -1,0 +1,51 @@
+{
+  "uid": "dns-bind-authoritative",
+  "title": "Authoritative Stats",
+  "tags": ["dns", "bind"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Authoritative Queries per Second",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (server) (rate(bind_queries_total[5m]))",
+          "legendFormat": "{{server}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Response Codes",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (server, rcode) (rate(bind_rcode_total[5m]))",
+          "legendFormat": "{{server}} {{rcode}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

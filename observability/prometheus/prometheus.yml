@@ -14,3 +14,7 @@ scrape_configs:
   - job_name: unbound
     static_configs:
       - targets: ["172.30.0.20:9167", "172.30.0.21:9167"]
+
+  - job_name: bind
+    static_configs:
+      - targets: ["172.30.0.13:9119", "172.30.0.14:9119"]

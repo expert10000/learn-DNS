@@ -21,3 +21,5 @@ Poniższa lista opisuje rekomendowaną kolejność Pull Requestów dla rozbudowy
 - PR 1: implemented (observability network + baseline plumbing).
 - PR 2: implemented (Prometheus + Grafana + cAdvisor, dashboard export).
 - PR 3: implemented (Unbound exporters + Resolver DNS stats dashboard).
+- PR 4: implemented (BIND exporters + Authoritative stats dashboard).
+- PR 5: implemented (structured logging baseline + filters/examples).
