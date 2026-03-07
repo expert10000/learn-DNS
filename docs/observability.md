@@ -28,6 +28,19 @@ Grafana provisions a folder named **DNS Lab** with a dashboard:
 Dashboard JSON is stored at:
 - `observability/grafana/dashboards/dns-lab-containers.json`
 
+## Unbound Metrics (Resolver DNS Stats)
+Two sidecar exporters expose Unbound stats via `unbound-control stats_noreset`:
+- `dns_unbound_exporter` (validating resolver)
+- `dns_unbound_exporter_plain` (plain resolver)
+
+Prometheus job: `unbound` (targets `172.30.0.20:9167`, `172.30.0.21:9167`).
+
+Grafana dashboard:
+- **Resolver DNS Stats** – QPS, cache hit ratio, NXDOMAIN/SERVFAIL
+
+Dashboard JSON:
+- `observability/grafana/dashboards/dns-unbound-stats.json`
+
 ## Quick Start
 1. `docker compose up -d --build`
 2. Open Grafana and verify the **DNS Lab Containers** dashboard is populated.
@@ -35,3 +48,4 @@ Dashboard JSON is stored at:
 ## Notes
 - Observability ports are bound to localhost only.
 - Container labels (`com.dns.*`) are used to filter metrics in Grafana.
+- Prometheus is attached to `mgmt_net` to reach the Unbound exporters.

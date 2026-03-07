@@ -45,6 +45,19 @@ The resolvers only allow recursion from the trusted and mgmt subnets.
   - IMAP: `127.0.0.1:1143`
   - IMAPS: `127.0.0.1:1993`
 
+## Observability
+This lab includes a minimal observability stack (Prometheus + Grafana + cAdvisor).
+
+Access:
+- Prometheus: `http://127.0.0.1:9090`
+- Grafana: `http://127.0.0.1:3000` (admin/admin)
+
+Details and dashboard export:
+- `docs/observability.md`
+
+Resolver DNS metrics:
+- Unbound stats are exported by sidecars and visualized in Grafana (dashboard **Resolver DNS Stats**).
+
 docker compose up -d --build
 
 Quick start:

@@ -16,3 +16,8 @@ Poniższa lista opisuje rekomendowaną kolejność Pull Requestów dla rozbudowy
 | 10 | **Run Demo + Proof (aggressive NSEC)** (`feature/demo-proof`) | Powtarzalny scenariusz + dowody | `POST /demo/aggressive-nsec` w `lab_api`: odpala serię zapytań (np. 50–200 NXDOMAIN), zbiera: `dig` output, różnicę `unbound stats`, opcjonalnie pcap z `dns_capture_resolver`; UI pokazuje wynik i pozwala pobrać artifact (JSON/ZIP) | Masz “ON vs OFF” porównanie; w metrykach widać spadek upstream queries; artifact zapisany |
 | 11 | **Security hardening for observability** (`feature/obs-security`) | Żeby to wyglądało “produkcyjnie” | Ograniczenia sieci (observability tylko z mgmt), hasła do Grafany/Kibany, blokada publicznych portów, `mem_limit` dla ES | Stack działa bez wystawiania ES na świat; minimalne creds; opis w docs |
 | 12 | **Thesis-ready docs + diagrams** (`docs/observability-chapter`) | Materiał do rozdziału | Diagram architektury (control-plane vs observability-plane), opis przepływów danych, screenshoty dashboardów i saved searches | Masz gotowy opis do “Część badawcza/testy” + “Wnioski” |
+
+## Status (as of 2026-03-07)
+- PR 1: implemented (observability network + baseline plumbing).
+- PR 2: implemented (Prometheus + Grafana + cAdvisor, dashboard export).
+- PR 3: implemented (Unbound exporters + Resolver DNS stats dashboard).

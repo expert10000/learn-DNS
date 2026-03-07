@@ -2,7 +2,7 @@
 set -e
 
 ANCHOR="/opt/unbound/etc/unbound/anchors/test.key"
-CONTROL_DIR="/opt/unbound/etc/unbound"
+CONTROL_DIR="/opt/unbound/etc/unbound/control"
 TLS_DIR="/opt/unbound/etc/unbound/tls"
 TLS_KEY="${TLS_DIR}/server.key"
 TLS_CERT="${TLS_DIR}/server.pem"
@@ -32,6 +32,7 @@ fi
 
 # Ensure control certs exist for unbound-control (flush support).
 if [ ! -s "${CONTROL_DIR}/unbound_server.key" ]; then
+  mkdir -p "${CONTROL_DIR}"
   /opt/unbound/sbin/unbound-control-setup -d "${CONTROL_DIR}" >/dev/null 2>&1 || true
 fi
 

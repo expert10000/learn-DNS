@@ -1,0 +1,74 @@
+{
+  "uid": "dns-unbound-stats",
+  "title": "Resolver DNS Stats",
+  "tags": ["dns", "unbound"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Queries per Second",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (resolver) (rate(unbound_stat{stat=\"total.num.queries\"}[5m]))",
+          "legendFormat": "{{resolver}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Cache Hit Ratio",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "decimals": 1, "min": 0, "max": 100 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "100 * (sum by (resolver) (rate(unbound_stat{stat=\"total.num.cachehits\"}[5m])) / (sum by (resolver) (rate(unbound_stat{stat=\"total.num.cachehits\"}[5m])) + sum by (resolver) (rate(unbound_stat{stat=\"total.num.cachemiss\"}[5m]))))",
+          "legendFormat": "{{resolver}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "NXDOMAIN / SERVFAIL",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "decimals": 2 },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (resolver) (rate(unbound_stat{stat=\"num.answer.rcode.NXDOMAIN\"}[5m]))",
+          "legendFormat": "NXDOMAIN {{resolver}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (resolver) (rate(unbound_stat{stat=\"num.answer.rcode.SERVFAIL\"}[5m]))",
+          "legendFormat": "SERVFAIL {{resolver}}",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

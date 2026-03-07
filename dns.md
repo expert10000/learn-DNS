@@ -507,3 +507,15 @@ Option A: add a dedicated aggressive demo resolver that is authoritative for
 "Run Demo + Proof" to that resolver. Result: upstream queries drop to 0 (local
 authoritative + cached NSEC/NSEC3), giving a clean, repeatable demo without
 breaking the main resolver.
+
+## Observability (Resolver DNS Metrics)
+Unbound exports internal DNS stats via `unbound-control stats_noreset`, which are
+scraped by Prometheus and visualized in Grafana.
+
+What you get in Grafana:
+- QPS per resolver
+- Cache hit ratio
+- NXDOMAIN and SERVFAIL rates
+
+Details and exported dashboards:
+- `docs/observability.md`

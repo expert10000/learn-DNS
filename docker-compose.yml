@@ -91,6 +91,7 @@ services:
       - ./unbound/start.sh:/opt/unbound/etc/unbound/start.sh:ro
       - ./anchors:/opt/unbound/etc/unbound/anchors
       - ./unbound/tls:/opt/unbound/etc/unbound/tls
+      - ./unbound/control_resolver:/opt/unbound/etc/unbound/control
       - ./unbound/log:/var/log/unbound
       - ./captures:/captures
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
@@ -137,6 +138,7 @@ services:
       - ./unbound/root.hints:/opt/unbound/etc/unbound/root.hints:ro
       - ./unbound/start_plain.sh:/opt/unbound/etc/unbound/start.sh:ro
       - ./unbound/tls:/opt/unbound/etc/unbound/tls
+      - ./unbound/control_plain:/opt/unbound/etc/unbound/control
       - ./unbound/log_plain:/var/log/unbound
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
     healthcheck:
@@ -362,6 +364,8 @@ services:
       <<: *obs_labels
       com.dns.role: "prometheus"
     networks:
+      mgmt_net:
+        ipv4_address: 172.30.0.12
       observability_net:
         ipv4_address: 172.35.0.10
     volumes:
@@ -423,6 +427,52 @@ services:
       - /var/lib/docker:/var/lib/docker:ro
     healthcheck:
       test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q cadvisor"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  unbound_exporter:
+    build: ./unbound_exporter
+    container_name: dns_unbound_exporter
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "unbound_exporter_resolver"
+    environment:
+      - UNBOUND_CONTROL_CONFIG=/opt/unbound/etc/unbound/unbound.conf
+      - UNBOUND_RESOLVER_NAME=resolver
+    network_mode: "service:resolver"
+    depends_on:
+      - resolver
+    volumes:
+      - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
+      - ./unbound/control_resolver:/opt/unbound/etc/unbound/control:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9167/metrics', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  unbound_exporter_plain:
+    build: ./unbound_exporter
+    container_name: dns_unbound_exporter_plain
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "unbound_exporter_plain"
+    environment:
+      - UNBOUND_CONTROL_CONFIG=/opt/unbound/etc/unbound/unbound.conf
+      - UNBOUND_RESOLVER_NAME=resolver_plain
+    network_mode: "service:resolver_plain"
+    depends_on:
+      - resolver_plain
+    volumes:
+      - ./unbound/unbound.plain.conf:/opt/unbound/etc/unbound/unbound.conf:ro
+      - ./unbound/control_plain:/opt/unbound/etc/unbound/control:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9167/metrics', timeout=2).read()\""]
       interval: 30s
       timeout: 5s
       retries: 5
