@@ -626,3 +626,50 @@
 2026-03-07T16:33:30.851682+00:00 mail postfix/lmtp[11779]: CA89BC8FB5: to=<user2@example.test>, relay=mail.example.test[/var/run/dovecot/lmtp], delay=0.02, delays=0/0/0.01/0.01, dsn=2.0.0, status=sent (250 2.0.0 <user2@example.test> SGJQMlpTrGlxLgAAUi6ngw Saved)
 2026-03-07T16:33:30.851705+00:00 mail dovecot: lmtp(11889): Disconnect from local: Logged out (state=READY)
 2026-03-07T16:33:30.851816+00:00 mail postfix/qmgr[9647]: CA89BC8FB5: removed
+2026-03-07T16:36:44.212030+00:00 mail postfix/smtpd-amavis/smtpd[11778]: timeout after END-OF-MESSAGE from localhost[127.0.0.1]
+2026-03-07T16:36:44.212040+00:00 mail postfix/smtpd-amavis/smtpd[11778]: disconnect from localhost[127.0.0.1] ehlo=1 mail=1 rcpt=1 data=1 commands=4
+2026-03-07T18:21:13.512485+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-07T18:21:14.019650+00:00 mail opendkim[204]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-07T18:21:14.972331+00:00 mail postfix/postfix-script[297]: starting the Postfix mail system
+2026-03-07T18:21:14.992683+00:00 mail postfix/master[298]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-07T18:21:15.786838+00:00 mail amavis[258]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-07T18:21:15.786870+00:00 mail amavis[258]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-07T18:21:15.850162+00:00 mail amavis[258]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-07T18:21:15.850190+00:00 mail amavis[258]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-07T18:21:15.858132+00:00 mail amavis[258]: No ext program for   .zoo, tried: zoo
+2026-03-07T18:21:15.858283+00:00 mail amavis[258]: No ext program for   .doc, tried: ripole
+2026-03-07T18:21:15.859232+00:00 mail amavis[258]: No ext program for   .zst, tried: unzstd
+2026-03-07T18:21:15.859255+00:00 mail amavis[258]: No decoder for       .F   
+2026-03-07T18:21:15.859258+00:00 mail amavis[258]: No decoder for       .doc 
+2026-03-07T18:21:15.859261+00:00 mail amavis[258]: No decoder for       .zoo 
+2026-03-07T18:21:15.859384+00:00 mail amavis[258]: No decoder for       .zst 
+2026-03-07T18:21:15.993367+00:00 mail postfix/postfix-script[433]: refreshing the Postfix mail system
+2026-03-07T18:21:16.000487+00:00 mail postfix/master[298]: reload -- version 3.7.11, configuration /etc/postfix
+2026-03-07T18:21:16.025213+00:00 mail dovecot: master: Warning: SIGHUP received - reloading configuration
+2026-03-07T18:21:16.133745+00:00 mail amavis[258]: (!)Net::Server: 2026/03/07-18:21:16 Re-exec server during HUP
+2026-03-07T18:21:16.325230+00:00 mail amavis[258]: starting. (warm) /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-07T18:21:16.325295+00:00 mail amavis[258]: perl=5.036000, user=999, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-07T18:21:16.338761+00:00 mail amavis[258]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-07T18:21:16.338816+00:00 mail amavis[258]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-07T18:21:16.343270+00:00 mail amavis[258]: No ext program for   .zoo, tried: zoo
+2026-03-07T18:21:16.343340+00:00 mail amavis[258]: No ext program for   .doc, tried: ripole
+2026-03-07T18:21:16.343465+00:00 mail amavis[258]: No ext program for   .zst, tried: unzstd
+2026-03-07T18:21:16.343493+00:00 mail amavis[258]: No decoder for       .F   
+2026-03-07T18:21:16.343498+00:00 mail amavis[258]: No decoder for       .doc 
+2026-03-07T18:21:16.343502+00:00 mail amavis[258]: No decoder for       .zoo 
+2026-03-07T18:21:16.343506+00:00 mail amavis[258]: No decoder for       .zst 
+2026-03-07T18:22:18.147040+00:00 mail dovecot: master: Dovecot v2.3.19.1 (9b53102964) starting up for imap, lmtp (core dumps disabled)
+2026-03-07T18:22:18.620640+00:00 mail opendkim[650]: OpenDKIM Filter v2.11.0 starting (args: -f)
+2026-03-07T18:22:19.217003+00:00 mail postfix/postfix-script[741]: starting the Postfix mail system
+2026-03-07T18:22:19.224129+00:00 mail postfix/master[742]: daemon started -- version 3.7.11, configuration /etc/postfix
+2026-03-07T18:22:19.722053+00:00 mail amavis[719]: starting. /usr/sbin/amavisd at mail.example.test amavis-2.13.0 (20230106), Unicode aware, LC_CTYPE="C.UTF-8"
+2026-03-07T18:22:19.722105+00:00 mail amavis[719]: perl=5.036000, user=, EUID: 999 (999);  group=(), EGID: 999 999 (999 999)
+2026-03-07T18:22:19.742495+00:00 mail amavis[719]: Net::Server: Group Not Defined.  Defaulting to EGID '999 999'
+2026-03-07T18:22:19.742531+00:00 mail amavis[719]: Net::Server: User Not Defined.  Defaulting to EUID '999'
+2026-03-07T18:22:19.749131+00:00 mail amavis[719]: No ext program for   .zoo, tried: zoo
+2026-03-07T18:22:19.749179+00:00 mail amavis[719]: No ext program for   .doc, tried: ripole
+2026-03-07T18:22:19.749369+00:00 mail amavis[719]: No ext program for   .zst, tried: unzstd
+2026-03-07T18:22:19.749398+00:00 mail amavis[719]: No decoder for       .F   
+2026-03-07T18:22:19.749401+00:00 mail amavis[719]: No decoder for       .doc 
+2026-03-07T18:22:19.749404+00:00 mail amavis[719]: No decoder for       .zoo 
+2026-03-07T18:22:19.749406+00:00 mail amavis[719]: No decoder for       .zst 

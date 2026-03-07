@@ -1,0 +1,81 @@
+{
+  "uid": "dns-lab-containers",
+  "title": "DNS Lab Containers",
+  "tags": ["dns", "lab"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "CPU Usage (cores)",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cores",
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (container_label_com_dns_role) (rate(container_cpu_usage_seconds_total{container_label_com_dns_lab=\"dns-security-lab\", container_label_com_dns_role=~\"dns_resolver|dns_resolver_plain|dns_lab_api|dns_react_ui\"}[5m]))",
+          "legendFormat": "{{container_label_com_dns_role}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Memory Working Set",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (container_label_com_dns_role) (container_memory_working_set_bytes{container_label_com_dns_lab=\"dns-security-lab\", container_label_com_dns_role=~\"dns_resolver|dns_resolver_plain|dns_lab_api|dns_react_ui\"})",
+          "legendFormat": "{{container_label_com_dns_role}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Network Throughput",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum by (container_label_com_dns_role) (rate(container_network_receive_bytes_total{container_label_com_dns_lab=\"dns-security-lab\", container_label_com_dns_role=~\"dns_resolver|dns_resolver_plain|dns_lab_api|dns_react_ui\"}[5m]))",
+          "legendFormat": "RX {{container_label_com_dns_role}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (container_label_com_dns_role) (rate(container_network_transmit_bytes_total{container_label_com_dns_lab=\"dns-security-lab\", container_label_com_dns_role=~\"dns_resolver|dns_resolver_plain|dns_lab_api|dns_react_ui\"}[5m]))",
+          "legendFormat": "TX {{container_label_com_dns_role}}",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

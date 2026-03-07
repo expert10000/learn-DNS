@@ -1,11 +1,25 @@
 
 name: dns-security-lab
 
+x-lab-labels: &lab_labels
+  com.dns.lab: "dns-security-lab"
+
+x-core-labels: &core_labels
+  <<: *lab_labels
+  com.dns.stack: "core"
+
+x-obs-labels: &obs_labels
+  <<: *lab_labels
+  com.dns.stack: "observability"
+
 services:
   authoritative_parent:
     image: internetsystemsconsortium/bind9:9.18
     container_name: dns_authoritative_parent
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "authoritative_parent"
     networks:
       dns_core:
         ipv4_address: 172.31.0.10
@@ -14,6 +28,12 @@ services:
       - ./bind9_parent/zones:/etc/bind/zones
       - ./bind9_parent/keys:/etc/bind/keys
       - ./bind9_parent/log:/var/log/bind
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q named"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     # No published ports: reachable only inside Docker networks.
 
   authoritative_child:
@@ -22,6 +42,9 @@ services:
       dockerfile: Dockerfile
     container_name: dns_authoritative_child
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "authoritative_child"
     networks:
       dns_core:
         ipv4_address: 172.31.0.11
@@ -31,6 +54,12 @@ services:
       - ./bind9/keys:/etc/bind/keys
       - ./bind9/log:/var/log/bind
       - ./captures:/captures
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q named"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     # No published ports: reachable only inside Docker networks.
 
   resolver:
@@ -39,6 +68,9 @@ services:
       dockerfile: Dockerfile
     container_name: dns_resolver
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "dns_resolver"
     depends_on:
       - authoritative_parent
       - authoritative_child
@@ -62,12 +94,18 @@ services:
       - ./unbound/log:/var/log/unbound
       - ./captures:/captures
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q unbound"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     # Optional: expose ONLY to localhost on the VM (host-side dig via tunnel)
     ports:
     #  - "127.0.0.1:5300:53/udp"
     #  - "127.0.0.1:5300:53/tcp"
-      - "5300:53/udp"
-      - "5300:53/tcp"
+      - "127.0.0.1:5300:53/udp"
+      - "127.0.0.1:5300:53/tcp"
 
 
 
@@ -77,6 +115,9 @@ services:
       dockerfile: Dockerfile
     container_name: dns_resolver_plain
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "dns_resolver_plain"
     depends_on:
       - authoritative_parent
       - authoritative_child
@@ -98,17 +139,26 @@ services:
       - ./unbound/tls:/opt/unbound/etc/unbound/tls
       - ./unbound/log_plain:/var/log/unbound
     command: ["sh", "/opt/unbound/etc/unbound/start.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q unbound"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     ports:
       #- "127.0.0.1:5301:53/udp"
       #- "127.0.0.1:5301:53/tcp"
-      - "5301:53/udp"
-      - "5301:53/tcp"
+      - "127.0.0.1:5301:53/udp"
+      - "127.0.0.1:5301:53/tcp"
 
   mailserver:
     image: ghcr.io/docker-mailserver/docker-mailserver:latest
     container_name: dns_mailserver
     hostname: mail.example.test
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "mailserver"
     env_file: ./mailserver.env
     networks:
       client_net:
@@ -133,6 +183,9 @@ services:
       context: ./swaks
     container_name: dns_swaks
     command: ["sh", "-lc", "sleep infinity"]
+    labels:
+      <<: *core_labels
+      com.dns.role: "swaks"
     networks:
       client_net:
         ipv4_address: 172.32.0.26
@@ -144,6 +197,9 @@ services:
       context: ./dot_proxy
     container_name: dns_dot_proxy
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "dot_proxy"
     environment:
       - UPSTREAM_HOST=172.30.0.20
       - UPSTREAM_PORT=53
@@ -160,6 +216,9 @@ services:
       context: ./doh_proxy
     container_name: dns_doh_proxy
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "doh_proxy"
     environment:
       - UPSTREAM_DNS=172.30.0.20
       - UPSTREAM_PORT=53
@@ -176,11 +235,20 @@ services:
     build:
       context: ./client_api
     container_name: dns_client
+    labels:
+      <<: *core_labels
+      com.dns.role: "client"
     environment:
       - PROFILE=trusted
       - DEFAULT_DNS_SERVER=172.32.0.20
       - CLIENT_API_KEY=change_me_long_random_client
       - CLIENT_RATE_LIMIT_PER_MIN=120
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       client_net:
         ipv4_address: 172.32.0.50
@@ -189,11 +257,20 @@ services:
     build:
       context: ./client_api
     container_name: dns_untrusted
+    labels:
+      <<: *core_labels
+      com.dns.role: "untrusted"
     environment:
       - PROFILE=untrusted
       - DEFAULT_DNS_SERVER=172.33.0.20
       - CLIENT_API_KEY=change_me_long_random_client
       - CLIENT_RATE_LIMIT_PER_MIN=120
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       untrusted_net:
         ipv4_address: 172.33.0.50
@@ -202,11 +279,20 @@ services:
     build:
       context: ./client_api
     container_name: dns_mgmt_client
+    labels:
+      <<: *core_labels
+      com.dns.role: "mgmt_client"
     environment:
       - PROFILE=mgmt
       - DEFAULT_DNS_SERVER=172.30.0.20
       - CLIENT_API_KEY=change_me_long_random_client
       - CLIENT_RATE_LIMIT_PER_MIN=120
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       mgmt_net:
         ipv4_address: 172.30.0.50
@@ -215,6 +301,9 @@ services:
     image: nicolaka/netshoot:latest
     container_name: dns_toolbox
     command: ["sh", "-lc", "sleep infinity"]
+    labels:
+      <<: *core_labels
+      com.dns.role: "toolbox"
     networks:
       mgmt_net:
         ipv4_address: 172.30.0.60
@@ -230,6 +319,9 @@ services:
       context: ./perf_tools
     container_name: dns_perf_tools
     command: ["sh", "-lc", "sleep infinity"]
+    labels:
+      <<: *core_labels
+      com.dns.role: "perf_tools"
     networks:
       client_net:
       dns_core:
@@ -243,6 +335,9 @@ services:
     image: portainer/portainer-ce:latest
     container_name: dns_portainer
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "portainer"
     networks:
       mgmt_net:
         ipv4_address: 172.30.0.10
@@ -257,6 +352,83 @@ services:
       - "9000:9000"
 
   # -------------------------
+  # Observability: Prometheus + Grafana + cAdvisor
+  # -------------------------
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: dns_prometheus
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "prometheus"
+    networks:
+      observability_net:
+        ipv4_address: 172.35.0.10
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - cadvisor
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q prometheus"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: dns_grafana
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "grafana"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_DEFAULT_THEME=light
+    networks:
+      observability_net:
+        ipv4_address: 172.35.0.11
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - prometheus
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q grafana"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: dns_cadvisor
+    restart: unless-stopped
+    labels:
+      <<: *obs_labels
+      com.dns.role: "cadvisor"
+    networks:
+      observability_net:
+        ipv4_address: 172.35.0.12
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q cadvisor"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # -------------------------
   # Option 2: ONE management API for React (logs + optional dig)
   # Optional: logs/management endpoints. React uses per-client APIs by default.
   # -------------------------
@@ -264,6 +436,9 @@ services:
     build: ./lab_api
     container_name: dns_lab_api
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "dns_lab_api"
     environment:
       - LAB_API_KEY=change_me_long_random
       - LAB_API_ALLOW_DOCKER=1
@@ -297,6 +472,12 @@ services:
     # Bind ONLY to localhost of the VM
     ports:
       - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     # Optional: allow API to show logs via HTTP (read-only)
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
@@ -315,6 +496,9 @@ services:
     build: ./agent_api
     container_name: dns_agent_authoritative
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "agent_authoritative"
     environment:
       - AGENT_ROLE=authoritative
       - AGENT_API_KEY=change_me_agent
@@ -326,6 +510,12 @@ services:
         ipv4_address: 172.30.0.91
       dns_core:
         ipv4_address: 172.31.0.91
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8081/health', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./bind9/named.conf:/config/bind/named.conf:ro
       - ./bind9/zones:/config/bind/zones:ro
@@ -340,6 +530,9 @@ services:
     build: ./agent_api
     container_name: dns_agent_resolver
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "agent_resolver"
     environment:
       - AGENT_ROLE=resolver
       - AGENT_API_KEY=change_me_agent
@@ -351,6 +544,12 @@ services:
         ipv4_address: 172.30.0.92
       dns_core:
         ipv4_address: 172.31.0.92
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8081/health', timeout=2).read()\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     volumes:
       - ./unbound/unbound.conf:/config/unbound/unbound.conf:ro
       - ./unbound/unbound.plain.conf:/config/unbound/unbound.plain.conf:ro
@@ -365,6 +564,9 @@ services:
     network_mode: "service:resolver"
     depends_on:
       - resolver
+    labels:
+      <<: *core_labels
+      com.dns.role: "capture_resolver"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -378,6 +580,9 @@ services:
     network_mode: "service:authoritative_child"
     depends_on:
       - authoritative_child
+    labels:
+      <<: *core_labels
+      com.dns.role: "capture_authoritative"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -389,6 +594,9 @@ services:
     container_name: dns_anchor_export
     depends_on:
       - authoritative_parent
+    labels:
+      <<: *core_labels
+      com.dns.role: "anchor_export"
     command:
       - sh
       - -lc
@@ -445,6 +653,9 @@ services:
     container_name: dns_ds_recompute
     depends_on:
       - authoritative_child
+    labels:
+      <<: *core_labels
+      com.dns.role: "ds_recompute"
     working_dir: /work
     command:
       - sh
@@ -466,6 +677,9 @@ services:
     image: internetsystemsconsortium/bind9:9.18
     container_name: dns_signing_switcher
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "signing_switcher"
     entrypoint: ["sh", "-lc", "sleep 315360000"]
     volumes:
       - ./scripts:/switcher:ro
@@ -476,6 +690,9 @@ services:
     image: internetsystemsconsortium/bind9:9.18
     container_name: dns_signer
     working_dir: /tmp
+    labels:
+      <<: *core_labels
+      com.dns.role: "signer"
     entrypoint: ["sh", "-lc"]
     command: "/signer/sign_zones.sh"
     volumes:
@@ -495,6 +712,9 @@ services:
         VITE_CLIENT_API_KEY: "change_me_long_random_client"
     container_name: dns_react_ui
     restart: unless-stopped
+    labels:
+      <<: *core_labels
+      com.dns.role: "dns_react_ui"
     networks:
       public_net:
         ipv4_address: 172.34.0.50
@@ -506,11 +726,19 @@ services:
         ipv4_address: 172.33.0.70
     ports:
       - "5173:80"
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o comm= -p 1 | grep -q nginx"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   portainer_data:
   mailserver_mail:
   mailserver_state:
+  prometheus_data:
+  grafana_data:
 
 networks:
   mgmt_net:
@@ -540,6 +768,13 @@ networks:
     ipam:
       config:
         - subnet: 172.33.0.0/24
+
+  observability_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.35.0.0/24
 
   public_net:
     driver: bridge
