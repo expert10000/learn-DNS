@@ -61,10 +61,14 @@ setup.template.pattern: "dns-lab-logs-*"
 
 output.elasticsearch:
   hosts: ["http://elasticsearch:9200"]
+  username: "${ELASTICSEARCH_USERNAME}"
+  password: "${ELASTICSEARCH_PASSWORD}"
   index: "dns-lab-logs-%{+yyyy.MM.dd}"
 
 setup.kibana:
   host: "http://kibana:5601"
+  username: "${ELASTICSEARCH_USERNAME}"
+  password: "${ELASTICSEARCH_PASSWORD}"
 
 processors:
   - add_host_metadata:

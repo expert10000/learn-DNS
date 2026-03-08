@@ -285,6 +285,13 @@ TOOLBOX_CONTAINER = os.getenv("TOOLBOX_CONTAINER", "dns_toolbox")
 PERF_TOOLS_CONTAINER = os.getenv("PERF_TOOLS_CONTAINER", "dns_perf_tools")
 MAILSERVER_CONTAINER = os.getenv("MAILSERVER_CONTAINER", "dns_mailserver")
 SWAKS_CONTAINER = os.getenv("SWAKS_CONTAINER", "dns_swaks")
+TRAFFIC_GEN_IMAGE = os.getenv("TRAFFIC_GEN_IMAGE", "dns-traffic-gen")
+
+NETWORK_SUFFIX_BY_PROFILE = {
+    "trusted": "client_net",
+    "untrusted": "untrusted_net",
+    "mgmt": "mgmt_net",
+}
 
 CLIENT_CONTAINER_BY_PROFILE = {
     "trusted": CLIENT_TRUSTED_CONTAINER,
@@ -308,6 +315,9 @@ MAX_DNSPERF_DURATION = 300
 MAX_DNSPERF_QUERIES = 5000
 MAX_DNSPERF_THREADS = 8
 MAX_DNSPERF_CLIENTS = 50
+MAX_TRAFFIC_QPS = 500
+MAX_TRAFFIC_DURATION = 300
+MAX_TRAFFIC_INFLIGHT = 800
 MAX_RESPERF_MAX_QPS = 300
 MAX_RESPERF_RAMP_QPS = 50
 MAX_RESPERF_CLIENTS = 50
@@ -921,6 +931,45 @@ class ResperfResponse(BaseModel):
     stdout: str
     stderr: str
     plot_file: Optional[str] = None
+
+class TrafficGenRequest(BaseModel):
+    profile: Literal["trusted", "untrusted", "mgmt"] = "trusted"
+    resolver: Literal["valid", "plain"] = "valid"
+    zone: str = "example.test"
+    qtype: Literal[
+        "A",
+        "AAAA",
+        "CAA",
+        "CNAME",
+        "DS",
+        "DNSKEY",
+        "MX",
+        "NS",
+        "NSEC",
+        "NSEC3",
+        "NSEC3PARAM",
+        "RRSIG",
+        "SOA",
+        "SRV",
+        "TXT",
+        "ANY",
+    ] = "A"
+    duration_s: int = 30
+    qps: int = 50
+    mode: Literal["valid", "nxdomain", "mix"] = "nxdomain"
+    nxdomain_ratio: float = 0.7
+    timeout_s: float = 1.0
+    max_inflight: int = 200
+    seed: Optional[int] = None
+
+class TrafficGenResponse(BaseModel):
+    ok: bool
+    target_ip: str
+    network: str
+    command: str
+    exit_code: int
+    stdout: str
+    stderr: str
 
 class UnboundControls(BaseModel):
     ratelimit: int
@@ -1610,6 +1659,16 @@ def docker_exec_root(container: str, sh_cmd: str, timeout_s: int = 8) -> CmdResp
 
 def docker_cmd(args: list[str], timeout_s: int = 8) -> CmdResponse:
     return run_cmd(["docker", *args], timeout_s)
+
+def resolve_network_by_suffix(suffix: str) -> str:
+    res = docker_cmd(["network", "ls", "--format", "{{.Name}}"])
+    if not res.ok:
+        raise HTTPException(status_code=500, detail="Failed to list Docker networks")
+    names = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    for candidate in names:
+        if candidate == suffix or candidate.endswith(f"_{suffix}"):
+            return candidate
+    raise HTTPException(status_code=500, detail=f"Network not found: {suffix}")
 
 def _cmd_failure(command: str, message: str, exit_code: int = 127) -> CmdResponse:
     return CmdResponse(
@@ -2386,6 +2445,96 @@ def perf_resperf(
         stdout=res.stdout,
         stderr=res.stderr,
         plot_file=plot_path,
+    )
+
+@app.post("/traffic/generate", response_model=TrafficGenResponse)
+def traffic_generate(
+    req: TrafficGenRequest,
+    x_api_key: Optional[str] = Header(default=None),
+    request: Request = None,
+):
+    require_key(x_api_key)
+    require_docker()
+
+    zone = validate_name(req.zone)
+    if req.qps < 1 or req.qps > MAX_TRAFFIC_QPS:
+        raise HTTPException(status_code=400, detail="Invalid qps")
+    if req.duration_s < 1 or req.duration_s > MAX_TRAFFIC_DURATION:
+        raise HTTPException(status_code=400, detail="Invalid duration_s")
+    if req.max_inflight < 1 or req.max_inflight > MAX_TRAFFIC_INFLIGHT:
+        raise HTTPException(status_code=400, detail="Invalid max_inflight")
+    if req.timeout_s <= 0 or req.timeout_s > 10:
+        raise HTTPException(status_code=400, detail="Invalid timeout_s")
+    if req.mode == "mix" and (req.nxdomain_ratio < 0 or req.nxdomain_ratio > 1):
+        raise HTTPException(status_code=400, detail="Invalid nxdomain_ratio")
+
+    image_check = docker_cmd(["image", "inspect", TRAFFIC_GEN_IMAGE])
+    if not image_check.ok:
+        raise HTTPException(
+            status_code=424,
+            detail=(
+                "Traffic generator image not found. Build it on the host: "
+                "docker build -t dns-traffic-gen ./tools/traffic_gen"
+            ),
+        )
+
+    target_ip = RESOLVER_BY_PROFILE[req.resolver][req.profile]
+    suffix = NETWORK_SUFFIX_BY_PROFILE[req.profile]
+    network = resolve_network_by_suffix(suffix)
+
+    args = [
+        "run",
+        "--rm",
+        "--network",
+        network,
+        TRAFFIC_GEN_IMAGE,
+        "--server",
+        target_ip,
+        "--port",
+        "53",
+        "--zone",
+        zone,
+        "--qtype",
+        req.qtype,
+        "--duration",
+        str(req.duration_s),
+        "--qps",
+        str(req.qps),
+        "--mode",
+        req.mode,
+        "--timeout",
+        str(req.timeout_s),
+        "--max-inflight",
+        str(req.max_inflight),
+    ]
+    if req.mode == "mix":
+        args.extend(["--nxdomain-ratio", str(req.nxdomain_ratio)])
+    if req.seed is not None:
+        args.extend(["--seed", str(req.seed)])
+
+    timeout_s = min(600, max(20, req.duration_s + 20))
+    res = docker_cmd(args, timeout_s=timeout_s)
+    if request:
+        audit_log(
+            request,
+            "traffic_generate",
+            {
+                "profile": req.profile,
+                "resolver": req.resolver,
+                "mode": req.mode,
+                "qps": req.qps,
+                "duration_s": req.duration_s,
+                "ok": res.ok,
+            },
+        )
+    return TrafficGenResponse(
+        ok=res.ok,
+        target_ip=target_ip,
+        network=network,
+        command=res.command,
+        exit_code=res.exit_code,
+        stdout=res.stdout,
+        stderr=res.stderr,
     )
 
 @app.post("/availability/flood", response_model=FloodTestResponse)

@@ -632,6 +632,32 @@ type ResperfResponse = {
   plot_file?: string;
 };
 
+type TrafficMode = 'valid' | 'nxdomain' | 'mix';
+
+type TrafficGenRequest = {
+  profile: Client;
+  resolver: ResolverKind;
+  zone: string;
+  qtype: string;
+  duration_s: number;
+  qps: number;
+  mode: TrafficMode;
+  nxdomain_ratio: number;
+  timeout_s: number;
+  max_inflight: number;
+  seed?: number;
+};
+
+type TrafficGenResponse = {
+  ok: boolean;
+  target_ip: string;
+  network: string;
+  command: string;
+  exit_code: number;
+  stdout: string;
+  stderr: string;
+};
+
 type UnboundControls = {
   ratelimit: number;
   ip_ratelimit: number;
@@ -1419,6 +1445,19 @@ export default function App() {
   const [resperfClients, setResperfClients] = useState(5);
   const [resperfQueriesPerStep, setResperfQueriesPerStep] = useState(100);
   const [resperfPlotName, setResperfPlotName] = useState('resperf_plot.txt');
+  const [trafficProfile, setTrafficProfile] = useState<Client>('trusted');
+  const [trafficResolver, setTrafficResolver] = useState<ResolverKind>('valid');
+  const [trafficZone, setTrafficZone] = useState('example.test');
+  const [trafficQtype, setTrafficQtype] = useState('A');
+  const [trafficMode, setTrafficMode] = useState<TrafficMode>('nxdomain');
+  const [trafficQps, setTrafficQps] = useState(50);
+  const [trafficDuration, setTrafficDuration] = useState(30);
+  const [trafficRatio, setTrafficRatio] = useState(0.7);
+  const [trafficTimeout, setTrafficTimeout] = useState(1.0);
+  const [trafficMaxInflight, setTrafficMaxInflight] = useState(200);
+  const [trafficBusy, setTrafficBusy] = useState(false);
+  const [trafficStatus, setTrafficStatus] = useState('');
+  const [trafficOutput, setTrafficOutput] = useState('');
   const [loadCount, setLoadCount] = useState(200);
   const [loadQps, setLoadQps] = useState(20);
   const [probeCount, setProbeCount] = useState(5);
@@ -1992,6 +2031,27 @@ export default function App() {
     { value: 'resolver_plain', label: 'Resolver (plain) — 172.32.0.21' },
     { value: 'authoritative_parent', label: 'Authoritative parent — 172.31.0.10' },
     { value: 'authoritative_child', label: 'Authoritative child — 172.31.0.11' },
+  ];
+  const trafficModeOptions: { value: TrafficMode; label: string }[] = [
+    { value: 'nxdomain', label: 'NXDOMAIN burst' },
+    { value: 'valid', label: 'Valid names only' },
+    { value: 'mix', label: 'Mixed (ratio)' },
+  ];
+  const trafficQtypeOptions = [
+    'A',
+    'AAAA',
+    'TXT',
+    'MX',
+    'NS',
+    'SOA',
+    'SRV',
+    'CAA',
+    'DNSKEY',
+    'DS',
+    'RRSIG',
+    'NSEC',
+    'NSEC3',
+    'NSEC3PARAM',
   ];
   const nxdomainRatio = availabilityMetrics?.ratios.nxdomain;
   const servfailRatio = availabilityMetrics?.ratios.servfail;
@@ -3821,6 +3881,50 @@ export default function App() {
       );
     } finally {
       setResperfBusy(false);
+    }
+  };
+
+  const runTrafficGen = async () => {
+    if (missingLabKey) {
+      setTrafficStatus('Missing Lab API key.');
+      return;
+    }
+    setTrafficBusy(true);
+    setTrafficStatus('Running traffic generator...');
+    setTrafficOutput('');
+    try {
+      const body: TrafficGenRequest = {
+        profile: trafficProfile,
+        resolver: trafficResolver,
+        zone: trafficZone.trim() || 'example.test',
+        qtype: trafficQtype,
+        duration_s: trafficDuration,
+        qps: trafficQps,
+        mode: trafficMode,
+        nxdomain_ratio: trafficRatio,
+        timeout_s: trafficTimeout,
+        max_inflight: trafficMaxInflight,
+      };
+      const result = await postJson<TrafficGenResponse>(
+        `${LAB_API_BASE}/traffic/generate`,
+        body,
+        labHeaders
+      );
+      const text = `${result.stdout}${result.stderr ? `\n${result.stderr}` : ''}`;
+      setTrafficOutput(`${result.command}\n\n${text}`.trim());
+      setTrafficStatus(
+        result.ok
+          ? `Traffic completed (target ${result.target_ip}).`
+          : `Traffic completed with errors (target ${result.target_ip}).`
+      );
+    } catch (err) {
+      await maybeAttachStartupDiagnostics(
+        (err as Error).message,
+        setTrafficStatus,
+        setTrafficOutput
+      );
+    } finally {
+      setTrafficBusy(false);
     }
   };
 
@@ -6887,6 +6991,145 @@ nslookup -port=5301 -type=SOA example.test 127.0.0.1`}</pre>
         </div>
         <pre className="output">
           {resperfOutput || 'No resperf output yet.'}
+        </pre>
+
+        <div className="section-title">Traffic generator (controlled QPS)</div>
+        <div className="hint">
+          <div>
+            Runs a lightweight Python generator in a throwaway container. Build the
+            image once on the host: <code>docker build -t dns-traffic-gen ./tools/traffic_gen</code>.
+          </div>
+          <div>
+            Target: <code>{trafficResolver}</code> via{' '}
+            <code>{resolverIpByClient[trafficResolver][trafficProfile]}</code>
+          </div>
+        </div>
+        <div className="grid">
+          <label>
+            Profile
+            <select
+              value={trafficProfile}
+              onChange={(e) => setTrafficProfile(e.target.value as Client)}
+              disabled={trafficBusy}
+            >
+              <option value="trusted">trusted</option>
+              <option value="untrusted">untrusted</option>
+              <option value="mgmt">mgmt</option>
+            </select>
+          </label>
+          <label>
+            Resolver
+            <select
+              value={trafficResolver}
+              onChange={(e) => setTrafficResolver(e.target.value as ResolverKind)}
+              disabled={trafficBusy}
+            >
+              <option value="valid">valid</option>
+              <option value="plain">plain</option>
+            </select>
+          </label>
+          <label>
+            Zone
+            <input
+              value={trafficZone}
+              onChange={(e) => setTrafficZone(e.target.value)}
+              disabled={trafficBusy}
+            />
+          </label>
+          <label>
+            QTYPE
+            <select
+              value={trafficQtype}
+              onChange={(e) => setTrafficQtype(e.target.value)}
+              disabled={trafficBusy}
+            >
+              {trafficQtypeOptions.map((opt) => (
+                <option key={opt} value={opt}>
+                  {opt}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Mode
+            <select
+              value={trafficMode}
+              onChange={(e) => setTrafficMode(e.target.value as TrafficMode)}
+              disabled={trafficBusy}
+            >
+              {trafficModeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            NXDOMAIN ratio
+            <input
+              type="number"
+              min={0}
+              max={1}
+              step={0.05}
+              value={trafficRatio}
+              onChange={(e) => setTrafficRatio(Number(e.target.value))}
+              disabled={trafficBusy || trafficMode !== 'mix'}
+            />
+          </label>
+          <label>
+            Duration (s)
+            <input
+              type="number"
+              min={1}
+              max={300}
+              value={trafficDuration}
+              onChange={(e) => setTrafficDuration(Number(e.target.value))}
+              disabled={trafficBusy}
+            />
+          </label>
+          <label>
+            QPS
+            <input
+              type="number"
+              min={1}
+              max={500}
+              value={trafficQps}
+              onChange={(e) => setTrafficQps(Number(e.target.value))}
+              disabled={trafficBusy}
+            />
+          </label>
+          <label>
+            Timeout (s)
+            <input
+              type="number"
+              min={0.2}
+              max={10}
+              step={0.1}
+              value={trafficTimeout}
+              onChange={(e) => setTrafficTimeout(Number(e.target.value))}
+              disabled={trafficBusy}
+            />
+          </label>
+          <label>
+            Max inflight
+            <input
+              type="number"
+              min={1}
+              max={800}
+              value={trafficMaxInflight}
+              onChange={(e) => setTrafficMaxInflight(Number(e.target.value))}
+              disabled={trafficBusy}
+            />
+          </label>
+        </div>
+        <div className="actions">
+          <button onClick={runTrafficGen} disabled={trafficBusy || missingLabKey}>
+            Run traffic
+          </button>
+        </div>
+        <div className="status">{trafficStatus || 'Ready.'}</div>
+        <pre className="output">
+          {trafficOutput || 'No traffic output yet.'}
         </pre>
       </section>
       )}

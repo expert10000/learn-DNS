@@ -50,10 +50,14 @@ This lab includes a minimal observability stack (Prometheus + Grafana + cAdvisor
 
 Access:
 - Prometheus: `http://127.0.0.1:9090`
-- Grafana: `http://127.0.0.1:3000` (admin/admin)
+- Grafana: `http://127.0.0.1:3000` (admin / `GF_SECURITY_ADMIN_PASSWORD` in `observability/observability.env`)
 
 Details and dashboard export:
 - `docs/observability.md`
+Thesis-ready chapter:
+- `docs/observability-chapter.md`
+Credentials:
+- `observability/observability.env` (change before sharing the lab)
 
 Resolver DNS metrics:
 - Unbound stats are exported by sidecars and visualized in Grafana (dashboard **Resolver DNS Stats**).
@@ -65,7 +69,7 @@ Logging baseline:
 - Unbound and BIND logs include consistent timestamps/identity; filters and locations in `docs/observability.md`.
 
 ELK logs:
-- Kibana is available at `http://127.0.0.1:5601` with a data view export in `observability/kibana/saved_objects.ndjson`.
+- Kibana is available at `http://127.0.0.1:5601` (kibana_system / `KIBANA_SYSTEM_PASSWORD` in `observability/observability.env`) with a data view export in `observability/kibana/saved_objects.ndjson`.
 
 Correlation:
 - Grafana dashboards include links to Kibana Discover for the same time range.

@@ -370,11 +370,12 @@ services:
         ipv4_address: 172.30.0.12
       observability_net:
         ipv4_address: 172.35.0.10
+      obs_access: {}
     volumes:
       - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
-      - "0.0.0.0:9090:9090"
+      - "127.0.0.1:9090:9090"
     depends_on:
       - cadvisor
     healthcheck:
@@ -391,19 +392,20 @@ services:
     labels:
       <<: *obs_labels
       com.dns.role: "grafana"
+    env_file:
+      - ./observability/observability.env
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_USERS_DEFAULT_THEME=light
     networks:
       observability_net:
         ipv4_address: 172.35.0.11
+      obs_access: {}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
-      - "0.0.0.0:3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
     healthcheck:
@@ -551,14 +553,19 @@ services:
     labels:
       <<: *obs_labels
       com.dns.role: "elasticsearch"
+    env_file:
+      - ./observability/observability.env
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false
+      - xpack.security.enabled=true
       - xpack.security.enrollment.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - xpack.security.transport.ssl.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
     networks:
       observability_net:
         ipv4_address: 172.35.0.20
+      obs_access: {}
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     ports:
@@ -572,15 +579,20 @@ services:
     labels:
       <<: *obs_labels
       com.dns.role: "kibana"
+    env_file:
+      - ./observability/observability.env
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - XPACK_SECURITY_ENABLED=false
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD}
       - SERVER_HOST=0.0.0.0
+      - XPACK_SECURITY_ENABLED=true
     networks:
       observability_net:
         ipv4_address: 172.35.0.21
+      obs_access: {}
     ports:
-      - "0.0.0.0:5601:5601"
+      - "127.0.0.1:5601:5601"
     depends_on:
       - elasticsearch
 
@@ -593,6 +605,8 @@ services:
       com.dns.role: "filebeat"
     user: root
     command: ["--strict.perms=false"]
+    env_file:
+      - ./observability/observability.env
     networks:
       observability_net:
         ipv4_address: 172.35.0.22
@@ -953,10 +967,17 @@ networks:
 
   observability_net:
     driver: bridge
-    internal: false
+    internal: true
     ipam:
       config:
         - subnet: 172.35.0.0/24
+
+  obs_access:
+    driver: bridge
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.36.0.0/24
 
   public_net:
     driver: bridge

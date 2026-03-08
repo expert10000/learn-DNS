@@ -1,0 +1,132 @@
+{
+  "timestamp": "2026-03-07T22:44:53.486031+00:00",
+  "request": {
+    "profile": "trusted",
+    "resolver": "valid",
+    "zone": "example.test",
+    "count": 100,
+    "qps": 50,
+    "capture": true,
+    "capture_target": "resolver",
+    "cold_restart": true,
+    "restore": true,
+    "zip": true
+  },
+  "result": {
+    "ok": true,
+    "zone": "example.test",
+    "count": 100,
+    "qps": 50,
+    "profile": "trusted",
+    "resolver": "valid",
+    "phases": [
+      {
+        "aggressive_nsec": false,
+        "dig_first": {
+          "ok": true,
+          "command": "docker exec dns_client sh -lc dig @172.32.0.20 nx-417454-0.example.test A +time=1 +tries=1 +dnssec",
+          "exit_code": 0,
+          "stdout": "\n; <<>> DiG 9.20.19 <<>> @172.32.0.20 nx-417454-0.example.test A +time=1 +tries=1 +dnssec\n; (1 server found)\n;; global options: +cmd\n;; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 33270\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 8, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags: do; udp: 1232\n;; QUESTION SECTION:\n;nx-417454-0.example.test.\tIN\tA\n\n;; AUTHORITY SECTION:\nexample.test.\t\t300\tIN\tSOA\tns-child.test. admin.example.test. 2026030204 3600 900 604800 300\nexample.test.\t\t300\tIN\tRRSIG\tSOA 13 2 300 20260406214203 20260307214203 58408 example.test. PunNTibsQfGIHNwWuZbGqDzb+QgH5Pfl1Z5OVYenXrj5VnkLYe31h71V 0RdpJBnVkMhkipbNxhezaVhFwXC/fg==\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 300 IN NSEC3 1 1 0 18ED6C89 EOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK NS SOA MX TXT RRSIG DNSKEY NSEC3PARAM CDS CDNSKEY\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 300 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. 56U6NjpkZLtE9+NNJW4KzGOMqp9eWjqI89zA1Z7Z7mdTIoxCMo9UIeMb F8MSaUJnmuEzU5V9wvOYfVAB97rTbQ==\n6KPO4REN5EBAAJM9EQBKP8JN1101HSCK.example.test. 300 IN NSEC3 1 1 0 18ED6C89 C70I9P8O5A6JHR7NDS8JICUUSETLVH3O\n6KPO4REN5EBAAJM9EQBKP8JN1101HSCK.example.test. 300 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. oqmLuHFdvdRlJBmmY2sTlUABgLJOXxVc5lFR8Zhfda4VMSBNu7KNBxfB TyqxqLbLZ2dHvIIem4EnqFPhR1u/nQ==\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 300 IN NSEC3 1 1 0 18ED6C89 6BOFSP519MMJBKERSUNOKRG9L677QIGL A TXT RRSIG\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 300 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. aYIItu/9PbefMBSXVWLV/O/Upd5Mg73n+f3GqyIfKEBRu88WngG7pyDE NrMrdPWmChVtlWCG6LI3XJLa0T9A/g==\n\n;; Query time: 12 msec\n;; SERVER: 172.32.0.20#53(172.32.0.20) (UDP)\n;; WHEN: Sat Mar 07 22:45:04 UTC 2026\n;; MSG SIZE  rcvd: 779\n\n",
+          "stderr": ""
+        },
+        "dig_last": {
+          "ok": true,
+          "command": "docker exec dns_client sh -lc dig @172.32.0.20 nx-417454-99.example.test A +time=1 +tries=1 +dnssec",
+          "exit_code": 0,
+          "stdout": "\n; <<>> DiG 9.20.19 <<>> @172.32.0.20 nx-417454-99.example.test A +time=1 +tries=1 +dnssec\n; (1 server found)\n;; global options: +cmd\n;; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 13593\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 8, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags: do; udp: 1232\n;; QUESTION SECTION:\n;nx-417454-99.example.test.\tIN\tA\n\n;; AUTHORITY SECTION:\nexample.test.\t\t327\tIN\tSOA\tns-child.test. admin.example.test. 2026030204 3600 900 604800 300\nexample.test.\t\t327\tIN\tRRSIG\tSOA 13 2 300 20260406214203 20260307214203 58408 example.test. PunNTibsQfGIHNwWuZbGqDzb+QgH5Pfl1Z5OVYenXrj5VnkLYe31h71V 0RdpJBnVkMhkipbNxhezaVhFwXC/fg==\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 327 IN NSEC3 1 1 0 18ED6C89 EOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK NS SOA MX TXT RRSIG DNSKEY NSEC3PARAM CDS CDNSKEY\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 327 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. 56U6NjpkZLtE9+NNJW4KzGOMqp9eWjqI89zA1Z7Z7mdTIoxCMo9UIeMb F8MSaUJnmuEzU5V9wvOYfVAB97rTbQ==\n6KPO4REN5EBAAJM9EQBKP8JN1101HSCK.example.test. 327 IN NSEC3 1 1 0 18ED6C89 C70I9P8O5A6JHR7NDS8JICUUSETLVH3O\n6KPO4REN5EBAAJM9EQBKP8JN1101HSCK.example.test. 327 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. oqmLuHFdvdRlJBmmY2sTlUABgLJOXxVc5lFR8Zhfda4VMSBNu7KNBxfB TyqxqLbLZ2dHvIIem4EnqFPhR1u/nQ==\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 327 IN NSEC3 1 1 0 18ED6C89 6BOFSP519MMJBKERSUNOKRG9L677QIGL A TXT RRSIG\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 327 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. aYIItu/9PbefMBSXVWLV/O/Upd5Mg73n+f3GqyIfKEBRu88WngG7pyDE NrMrdPWmChVtlWCG6LI3XJLa0T9A/g==\n\n;; Query time: 56 msec\n;; SERVER: 172.32.0.20#53(172.32.0.20) (UDP)\n;; WHEN: Sat Mar 07 22:44:36 UTC 2026\n;; MSG SIZE  rcvd: 780\n\n",
+          "stderr": ""
+        },
+        "loop": {
+          "ok": true,
+          "command": "docker exec dns_client sh -lc for name in nx-417454-1.example.test nx-417454-2.example.test nx-417454-3.example.test nx-417454-4.example.test nx-417454-5.example.test nx-417454-6.example.test nx-417454-7.example.test nx-417454-8.example.test nx-417454-9.example.test nx-417454-10.example.test nx-417454-11.example.test nx-417454-12.example.test nx-417454-13.example.test nx-417454-14.example.test nx-417454-15.example.test nx-417454-16.example.test nx-417454-17.example.test nx-417454-18.example.test nx-417454-19.example.test nx-417454-20.example.test nx-417454-21.example.test nx-417454-22.example.test nx-417454-23.example.test nx-417454-24.example.test nx-417454-25.example.test nx-417454-26.example.test nx-417454-27.example.test nx-417454-28.example.test nx-417454-29.example.test nx-417454-30.example.test nx-417454-31.example.test nx-417454-32.example.test nx-417454-33.example.test nx-417454-34.example.test nx-417454-35.example.test nx-417454-36.example.test nx-417454-37.example.test nx-417454-38.example.test nx-417454-39.example.test nx-417454-40.example.test nx-417454-41.example.test nx-417454-42.example.test nx-417454-43.example.test nx-417454-44.example.test nx-417454-45.example.test nx-417454-46.example.test nx-417454-47.example.test nx-417454-48.example.test nx-417454-49.example.test nx-417454-50.example.test nx-417454-51.example.test nx-417454-52.example.test nx-417454-53.example.test nx-417454-54.example.test nx-417454-55.example.test nx-417454-56.example.test nx-417454-57.example.test nx-417454-58.example.test nx-417454-59.example.test nx-417454-60.example.test nx-417454-61.example.test nx-417454-62.example.test nx-417454-63.example.test nx-417454-64.example.test nx-417454-65.example.test nx-417454-66.example.test nx-417454-67.example.test nx-417454-68.example.test nx-417454-69.example.test nx-417454-70.example.test nx-417454-71.example.test nx-417454-72.example.test nx-417454-73.example.test nx-417454-74.example.test nx-417454-75.example.test nx-417454-76.example.test nx-417454-77.example.test nx-417454-78.example.test nx-417454-79.example.test nx-417454-80.example.test nx-417454-81.example.test nx-417454-82.example.test nx-417454-83.example.test nx-417454-84.example.test nx-417454-85.example.test nx-417454-86.example.test nx-417454-87.example.test nx-417454-88.example.test nx-417454-89.example.test nx-417454-90.example.test nx-417454-91.example.test nx-417454-92.example.test nx-417454-93.example.test nx-417454-94.example.test nx-417454-95.example.test nx-417454-96.example.test nx-417454-97.example.test nx-417454-98.example.test; do dig @172.32.0.20 $name A +time=1 +tries=1 +dnssec >/dev/null; sleep 0.020; done",
+          "exit_code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        "stats_before": {
+          "queries": 0.0,
+          "cache_hits": 0.0,
+          "cache_miss": 0.0,
+          "nxdomain": 0.0,
+          "servfail": 0.0,
+          "aggressive_nxdomain": 0.0,
+          "recursivereplies": 0.0
+        },
+        "stats_after": {
+          "queries": 100.0,
+          "cache_hits": 0.0,
+          "cache_miss": 100.0,
+          "nxdomain": 99.0,
+          "servfail": 0.0,
+          "aggressive_nxdomain": 0.0,
+          "recursivereplies": 99.0
+        },
+        "delta": {
+          "cache_miss": 100.0,
+          "recursivereplies": 99.0,
+          "servfail": 0.0,
+          "queries": 100.0,
+          "nxdomain": 99.0,
+          "cache_hits": 0.0,
+          "aggressive_nxdomain": 0.0
+        },
+        "capture_file": "resolver-20260307-224429.pcap"
+      },
+      {
+        "aggressive_nsec": true,
+        "dig_first": {
+          "ok": true,
+          "command": "docker exec dns_client sh -lc dig @172.32.0.20 nx-6779f9-0.example.test A +time=1 +tries=1 +dnssec",
+          "exit_code": 0,
+          "stdout": "\n; <<>> DiG 9.20.19 <<>> @172.32.0.20 nx-6779f9-0.example.test A +time=1 +tries=1 +dnssec\n; (1 server found)\n;; global options: +cmd\n;; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 15564\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 8, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags: do; udp: 1232\n;; QUESTION SECTION:\n;nx-6779f9-0.example.test.\tIN\tA\n\n;; AUTHORITY SECTION:\nexample.test.\t\t300\tIN\tSOA\tns-child.test. admin.example.test. 2026030204 3600 900 604800 300\nexample.test.\t\t300\tIN\tRRSIG\tSOA 13 2 300 20260406214203 20260307214203 58408 example.test. PunNTibsQfGIHNwWuZbGqDzb+QgH5Pfl1Z5OVYenXrj5VnkLYe31h71V 0RdpJBnVkMhkipbNxhezaVhFwXC/fg==\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 300 IN NSEC3 1 1 0 18ED6C89 EOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK NS SOA MX TXT RRSIG DNSKEY NSEC3PARAM CDS CDNSKEY\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 300 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. 56U6NjpkZLtE9+NNJW4KzGOMqp9eWjqI89zA1Z7Z7mdTIoxCMo9UIeMb F8MSaUJnmuEzU5V9wvOYfVAB97rTbQ==\nEOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK.example.test. 300 IN NSEC3 1 1 0 18ED6C89 P6TNK7N5BU2BOSHR47LLS447TRE5A9RQ A RRSIG\nEOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK.example.test. 300 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. fRagc/aPSPQPyIJoLE/bbsHiTG1BCABMlzWVeiSBEIL/VhG3S/q+2ybg 6vv9GqY45z+i3POKrabjSYV2oqAtcw==\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 300 IN NSEC3 1 1 0 18ED6C89 6BOFSP519MMJBKERSUNOKRG9L677QIGL A TXT RRSIG\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 300 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. aYIItu/9PbefMBSXVWLV/O/Upd5Mg73n+f3GqyIfKEBRu88WngG7pyDE NrMrdPWmChVtlWCG6LI3XJLa0T9A/g==\n\n;; Query time: 0 msec\n;; SERVER: 172.32.0.20#53(172.32.0.20) (UDP)\n;; WHEN: Sat Mar 07 22:44:43 UTC 2026\n;; MSG SIZE  rcvd: 787\n\n",
+          "stderr": ""
+        },
+        "dig_last": {
+          "ok": true,
+          "command": "docker exec dns_client sh -lc dig @172.32.0.20 nx-6779f9-99.example.test A +time=1 +tries=1 +dnssec",
+          "exit_code": 0,
+          "stdout": "\n; <<>> DiG 9.20.19 <<>> @172.32.0.20 nx-6779f9-99.example.test A +time=1 +tries=1 +dnssec\n; (1 server found)\n;; global options: +cmd\n;; Got answer:\n;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 58777\n;; flags: qr rd ra; QUERY: 1, ANSWER: 0, AUTHORITY: 8, ADDITIONAL: 1\n\n;; OPT PSEUDOSECTION:\n; EDNS: version: 0, flags: do; udp: 1232\n;; QUESTION SECTION:\n;nx-6779f9-99.example.test.\tIN\tA\n\n;; AUTHORITY SECTION:\nexample.test.\t\t292\tIN\tSOA\tns-child.test. admin.example.test. 2026030204 3600 900 604800 300\nexample.test.\t\t292\tIN\tRRSIG\tSOA 13 2 300 20260406214203 20260307214203 58408 example.test. PunNTibsQfGIHNwWuZbGqDzb+QgH5Pfl1Z5OVYenXrj5VnkLYe31h71V 0RdpJBnVkMhkipbNxhezaVhFwXC/fg==\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 292 IN NSEC3 1 1 0 18ED6C89 EOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK NS SOA MX TXT RRSIG DNSKEY NSEC3PARAM CDS CDNSKEY\nE4A8LH7Q037GN5FIQMA8PFFQ0JTUI51A.example.test. 292 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. 56U6NjpkZLtE9+NNJW4KzGOMqp9eWjqI89zA1Z7Z7mdTIoxCMo9UIeMb F8MSaUJnmuEzU5V9wvOYfVAB97rTbQ==\nEOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK.example.test. 292 IN NSEC3 1 1 0 18ED6C89 P6TNK7N5BU2BOSHR47LLS447TRE5A9RQ A RRSIG\nEOD0IPCFF5QTBNCKQJK96EMHCQBMD2BK.example.test. 292 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. fRagc/aPSPQPyIJoLE/bbsHiTG1BCABMlzWVeiSBEIL/VhG3S/q+2ybg 6vv9GqY45z+i3POKrabjSYV2oqAtcw==\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 292 IN NSEC3 1 1 0 18ED6C89 6BOFSP519MMJBKERSUNOKRG9L677QIGL A TXT RRSIG\nP6TNK7N5BU2BOSHR47LLS447TRE5A9RQ.example.test. 292 IN RRSIG NSEC3 13 3 300 20260406214203 20260307214203 58408 example.test. aYIItu/9PbefMBSXVWLV/O/Upd5Mg73n+f3GqyIfKEBRu88WngG7pyDE NrMrdPWmChVtlWCG6LI3XJLa0T9A/g==\n\n;; Query time: 0 msec\n;; SERVER: 172.32.0.20#53(172.32.0.20) (UDP)\n;; WHEN: Sat Mar 07 22:44:51 UTC 2026\n;; MSG SIZE  rcvd: 788\n\n",
+          "stderr": ""
+        },
+        "loop": {
+          "ok": true,
+          "command": "docker exec dns_client sh -lc for name in nx-6779f9-1.example.test nx-6779f9-2.example.test nx-6779f9-3.example.test nx-6779f9-4.example.test nx-6779f9-5.example.test nx-6779f9-6.example.test nx-6779f9-7.example.test nx-6779f9-8.example.test nx-6779f9-9.example.test nx-6779f9-10.example.test nx-6779f9-11.example.test nx-6779f9-12.example.test nx-6779f9-13.example.test nx-6779f9-14.example.test nx-6779f9-15.example.test nx-6779f9-16.example.test nx-6779f9-17.example.test nx-6779f9-18.example.test nx-6779f9-19.example.test nx-6779f9-20.example.test nx-6779f9-21.example.test nx-6779f9-22.example.test nx-6779f9-23.example.test nx-6779f9-24.example.test nx-6779f9-25.example.test nx-6779f9-26.example.test nx-6779f9-27.example.test nx-6779f9-28.example.test nx-6779f9-29.example.test nx-6779f9-30.example.test nx-6779f9-31.example.test nx-6779f9-32.example.test nx-6779f9-33.example.test nx-6779f9-34.example.test nx-6779f9-35.example.test nx-6779f9-36.example.test nx-6779f9-37.example.test nx-6779f9-38.example.test nx-6779f9-39.example.test nx-6779f9-40.example.test nx-6779f9-41.example.test nx-6779f9-42.example.test nx-6779f9-43.example.test nx-6779f9-44.example.test nx-6779f9-45.example.test nx-6779f9-46.example.test nx-6779f9-47.example.test nx-6779f9-48.example.test nx-6779f9-49.example.test nx-6779f9-50.example.test nx-6779f9-51.example.test nx-6779f9-52.example.test nx-6779f9-53.example.test nx-6779f9-54.example.test nx-6779f9-55.example.test nx-6779f9-56.example.test nx-6779f9-57.example.test nx-6779f9-58.example.test nx-6779f9-59.example.test nx-6779f9-60.example.test nx-6779f9-61.example.test nx-6779f9-62.example.test nx-6779f9-63.example.test nx-6779f9-64.example.test nx-6779f9-65.example.test nx-6779f9-66.example.test nx-6779f9-67.example.test nx-6779f9-68.example.test nx-6779f9-69.example.test nx-6779f9-70.example.test nx-6779f9-71.example.test nx-6779f9-72.example.test nx-6779f9-73.example.test nx-6779f9-74.example.test nx-6779f9-75.example.test nx-6779f9-76.example.test nx-6779f9-77.example.test nx-6779f9-78.example.test nx-6779f9-79.example.test nx-6779f9-80.example.test nx-6779f9-81.example.test nx-6779f9-82.example.test nx-6779f9-83.example.test nx-6779f9-84.example.test nx-6779f9-85.example.test nx-6779f9-86.example.test nx-6779f9-87.example.test nx-6779f9-88.example.test nx-6779f9-89.example.test nx-6779f9-90.example.test nx-6779f9-91.example.test nx-6779f9-92.example.test nx-6779f9-93.example.test nx-6779f9-94.example.test nx-6779f9-95.example.test nx-6779f9-96.example.test nx-6779f9-97.example.test nx-6779f9-98.example.test; do dig @172.32.0.20 $name A +time=1 +tries=1 +dnssec >/dev/null; sleep 0.020; done",
+          "exit_code": 0,
+          "stdout": "",
+          "stderr": ""
+        },
+        "stats_before": {
+          "queries": 0.0,
+          "cache_hits": 0.0,
+          "cache_miss": 0.0,
+          "nxdomain": 0.0,
+          "servfail": 0.0,
+          "aggressive_nxdomain": 0.0,
+          "recursivereplies": 0.0
+        },
+        "stats_after": {
+          "queries": 100.0,
+          "cache_hits": 0.0,
+          "cache_miss": 100.0,
+          "nxdomain": 98.0,
+          "servfail": 0.0,
+          "aggressive_nxdomain": 0.0,
+          "recursivereplies": 98.0
+        },
+        "delta": {
+          "cache_miss": 100.0,
+          "recursivereplies": 98.0,
+          "servfail": 0.0,
+          "queries": 100.0,
+          "nxdomain": 98.0,
+          "cache_hits": 0.0,
+          "aggressive_nxdomain": 0.0
+        },
+        "capture_file": "resolver-20260307-224443.pcap"
+      }
+    ],
+    "artifact_json": null,
+    "artifact_zip": null,
+    "notes": []
+  }
+}

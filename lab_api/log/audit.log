@@ -285,3 +285,8 @@
 {"ts": "2026-03-07T16:32:04.422952+00:00", "ip": "172.34.0.1", "path": "/email/inbox/list", "action": "email_inbox_list", "detail": {"ok": true, "user": "user2@example.test", "mailbox": "INBOX", "limit": 40}}
 {"ts": "2026-03-07T16:33:30.775354+00:00", "ip": "172.34.0.1", "path": "/email/send", "action": "email_send", "detail": {"ok": true, "to": "user2@example.test", "from": "user@example.test", "server": "mail.example.test", "port": 25, "tls": "none"}}
 {"ts": "2026-03-07T16:33:39.036150+00:00", "ip": "172.34.0.1", "path": "/email/inbox/list", "action": "email_inbox_list", "detail": {"ok": true, "user": "user2@example.test", "mailbox": "INBOX", "limit": 40}}
+{"ts": "2026-03-07T22:44:29.780072+00:00", "ip": "172.34.0.1", "path": "/demo/aggressive-nsec", "action": "capture_start", "detail": {"target": "resolver", "filter": "dns"}}
+{"ts": "2026-03-07T22:44:38.890785+00:00", "ip": "172.34.0.1", "path": "/demo/aggressive-nsec", "action": "capture_stop", "detail": {"target": "resolver", "file": "resolver-20260307-224429.pcap"}}
+{"ts": "2026-03-07T22:44:43.890288+00:00", "ip": "172.34.0.1", "path": "/demo/aggressive-nsec", "action": "capture_start", "detail": {"target": "resolver", "filter": "dns"}}
+{"ts": "2026-03-07T22:44:53.295829+00:00", "ip": "172.34.0.1", "path": "/demo/aggressive-nsec", "action": "capture_stop", "detail": {"target": "resolver", "file": "resolver-20260307-224443.pcap"}}
+{"ts": "2026-03-07T22:44:53.674967+00:00", "ip": "172.34.0.1", "path": "/demo/aggressive-nsec", "action": "demo_aggressive_nsec", "detail": {"ok": true, "count": 100, "resolver": "valid"}}

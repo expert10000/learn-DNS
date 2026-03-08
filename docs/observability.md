@@ -15,7 +15,7 @@ This lab includes a minimal observability stack (Prometheus + Grafana + cAdvisor
 - Prometheus: `http://127.0.0.1:9090`
 - Grafana: `http://127.0.0.1:3000`
   - user: `admin`
-  - pass: `admin`
+  - pass: value from `observability/observability.env` (`GF_SECURITY_ADMIN_PASSWORD`)
 
 ## Dashboards
 Grafana provisions a folder named **DNS Lab** with a dashboard:
@@ -57,6 +57,20 @@ Grafana dashboard:
 Dashboard JSON:
 - `observability/grafana/dashboards/dns-bind-authoritative.json`
 
+## Security Hardening
+- Credentials are stored in `observability/observability.env` (change them before sharing the lab).
+- Elasticsearch security is enabled (basic auth); Kibana uses the same credentials to connect.
+- Prometheus, Grafana, and Kibana are published to `127.0.0.1` only.
+- `observability_net` is internal to keep the stack isolated from other Docker networks.
+- `obs_access` is a dedicated bridge network used only to allow localhost port publishing.
+
+### Kibana system user
+Kibana must use the `kibana_system` user (the `elastic` superuser is rejected).
+Set its password once and update `observability/observability.env`:
+1. `docker compose exec elasticsearch /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system -b`
+2. Copy the generated password into `KIBANA_SYSTEM_PASSWORD` in `observability/observability.env`.
+3. `docker compose up -d kibana`
+
 ## ELK (Logs in Kibana)
 Minimal single-node ELK stack:
 - `elasticsearch` (single-node, memory limited)
@@ -66,6 +80,8 @@ Minimal single-node ELK stack:
 Access:
 - Elasticsearch: `http://127.0.0.1:9200`
 - Kibana: `http://127.0.0.1:5601`
+  - user: `kibana_system`
+  - pass: value from `observability/observability.env` (`KIBANA_SYSTEM_PASSWORD`)
 
 Log inputs (via Filebeat):
 - BIND parent/child: `bind9_parent/log/*.log`, `bind9/log/*.log`
@@ -115,5 +131,6 @@ Example (representative) lines you should see after running validation tests:
 
 ## Notes
 - Observability ports are bound to localhost only.
+- `observability_net` is internal and isolated from other Docker networks.
 - Container labels (`com.dns.*`) are used to filter metrics in Grafana.
 - Prometheus is attached to `mgmt_net` to reach the Unbound exporters.

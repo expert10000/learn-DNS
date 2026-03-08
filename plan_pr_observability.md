@@ -28,3 +28,19 @@ Poniższa lista opisuje rekomendowaną kolejność Pull Requestów dla rozbudowy
 - PR 8: implemented (agent-based nodes registry; no docker.sock).
 - PR 9: implemented (React UI nodes + overview + quick links).
 - PR 10: implemented (aggressive NSEC demo endpoint + artifact download + UI proof flow).
+- PR 11: implemented (observability security hardening: credentials, localhost binds, internal obs network).
+- PR 12: implemented (thesis-ready docs + diagrams + screenshot checklist).
+
+
+| PR | Tytuł (branch) | Cel | Co dokładnie wchodzi | DoD (Definition of Done) |
+|---:|---|---|---|---|
+| 13 | **Demo: DNSSEC chain-of-trust + failure modes** (`feature/demo-dnssec-chain`) | Pokazać poprawną walidację oraz typowe awarie DNSSEC | Scenariusze: poprawna walidacja (AD=1), prezentacja DNSKEY/DS/RRSIG; awarie: DS mismatch → SERVFAIL, expired RRSIG / zły czas, unsigned delegation; evidence: `dig +dnssec`, `delv`, staty Unbound, logi walidacji | UI ma 3–4 przyciski “Run demo”; każdy generuje artifact (ZIP/JSON) z dowodami |
+| 14 | **Demo: NSEC vs NSEC3 + enumeration / privacy trade-off** (`feature/demo-nsec-nsec3`) | Porównać NSEC i NSEC3 oraz ryzyko “zone walking” | Dwie wersje strefy: NSEC i NSEC3; pokaz proofów, co da się wylistować; evidence: wyniki `dig`, logi, PCAP, metryki NXDOMAIN/upstream | UI pokazuje porównanie (NSEC vs NSEC3) + link do PCAP + wykresy |
+| 15 | **Demo: Availability / flood test + mitigations** (`feature/demo-availability-flood`) | Zbadać dostępność pod obciążeniem i wpływ mitigacji | Generator obciążenia (`dnsperf`/`resperf`/k6) + NXDOMAIN flood; mitigacje: aggressive NSEC, rate limiting, cache tuning; pomiary QPS/latency/SERVFAIL | Dashboardy pokazują różnicę przed/po; dołączone logi + artifact z wynikami testu |
+| 16 | **DoT / DoH layer** (`feature/dot-doh`) | Pokazać poufność transportu DNS (DoT/DoH) | Dodanie warstwy DoT/DoH (proxy/terminator) + konfiguracja klienta; evidence: PCAP (TLS zamiast plaintext), testy porównawcze Do53 vs DoT vs DoH | UI ma test “Do53/DoT/DoH”; PCAP-y i krótkie podsumowanie wyników |
+| 17 | **Security hardening “prod-like”** (`feature/hardening-prodlike`) | Urealnić lab pod kątem segmentacji i ekspozycji usług | Sieci: client/untrusted/mgmt/observability; ograniczenie portów, read-only mounts, drop capabilities; (opcjonalnie) iptables dla segmentów | Z untrusted nie widać paneli admin; skan portów potwierdza izolację; dokumentacja zmian |
+| 18 | **Backups / restore / reproducibility** (`feature/repro-backup`) | Uczynić eksperymenty powtarzalnymi i łatwymi do odtworzenia | Skrypty snapshot: configi, klucze, dashboardy Grafany, saved searches Kibany; wersjonowanie stref/kluczy; restore | Jedna komenda robi bundle “reproduce experiment”; druga odtwarza stan labu |
+| 19 | **Thesis artifacts automation** (`feature/thesis-artifacts`) | Automatycznie generować materiały do pracy | Generowanie tabeli usług (kontener→rola→porty→sieci), eksport wykresów z Grafany, paczki wyników demo do `docs/assets/` | Komenda “generate-report” tworzy gotowe artefakty (tabele/wykresy/ZIPy) do rozdziałów |
+| 20 | **Public demo mode** (opcjonalnie) (`feature/demo-mode`) | Bezpieczny tryb prezentacyjny (read-only) | Blokady na endpointy wykonujące komendy; whitelist scenariuszy demo; ograniczenie dostępu; tryb “read-only UI” | Lab da się uruchomić do prezentacji bez ryzyka “nadużyć”; opis w docs + checklista |
+
+
